@@ -1,12 +1,19 @@
-import { prisma } from '../../lib/prisma.js';
-import { NotFoundError } from '../../errors/AppError.js';
+import { Prisma } from '@prisma/client';
 import type {
   BrandsResponse,
+  CatalogSort,
   CategoriesResponse,
   CategoryDetailDto,
   CategoryTreeNode,
+  ProductListQuery,
+  ProductListResponse,
   StoreSettingsDto,
 } from '@audio-commerce/shared';
+import { NotFoundError } from '../../errors/AppError.js';
+import { prisma } from '../../lib/prisma.js';
+import { resolveCategoryAndDescendantIds } from './categoryTree.js';
+import { escapeIlike } from './ilike.js';
+import { toCard } from './mapProduct.js';
 
 type Row = { id: string; slug: string; name: string; parentId: string | null };
 
@@ -68,4 +75,138 @@ export async function getBrands(): Promise<BrandsResponse> {
     select: { slug: true, name: true, logoUrl: true },
   });
   return { brands };
+}
+
+const productListInclude = {
+  brand: true,
+  category: true,
+  variants: true,
+  images: { orderBy: [{ position: 'asc' as const }, { id: 'asc' as const }] },
+};
+
+const sortPrimary: Record<CatalogSort, Prisma.Sql> = {
+  newest: Prisma.sql`matched."createdAt" DESC`,
+  name_asc: Prisma.sql`matched.name ASC`,
+  name_desc: Prisma.sql`matched.name DESC`,
+  price_asc: Prisma.sql`matched.min_price ASC`,
+  price_desc: Prisma.sql`matched.min_price DESC`,
+};
+
+function priceFilter(minPrice?: number, maxPrice?: number): Prisma.Sql {
+  const variantConds: Prisma.Sql[] = [];
+  const baseConds: Prisma.Sql[] = [];
+  if (minPrice !== undefined) {
+    variantConds.push(Prisma.sql`COALESCE(pv."priceOverride", p."basePrice") >= ${minPrice}`);
+    baseConds.push(Prisma.sql`p."basePrice" >= ${minPrice}`);
+  }
+  if (maxPrice !== undefined) {
+    variantConds.push(Prisma.sql`COALESCE(pv."priceOverride", p."basePrice") <= ${maxPrice}`);
+    baseConds.push(Prisma.sql`p."basePrice" <= ${maxPrice}`);
+  }
+  return Prisma.sql`(
+    EXISTS (
+      SELECT 1 FROM "ProductVariant" pv
+      WHERE pv."productId" = p.id
+        AND ${Prisma.join(variantConds, ' AND ')}
+    )
+    OR (
+      NOT EXISTS (SELECT 1 FROM "ProductVariant" pv WHERE pv."productId" = p.id)
+      AND ${Prisma.join(baseConds, ' AND ')}
+    )
+  )`;
+}
+
+export async function listProducts(query: ProductListQuery): Promise<ProductListResponse> {
+  const filters: Prisma.Sql[] = [Prisma.sql`p.status = 'ACTIVE'`];
+
+  if (query.category) {
+    const categoryIds = await resolveCategoryAndDescendantIds(query.category);
+    filters.push(Prisma.sql`p."categoryId" IN (${Prisma.join(categoryIds)})`);
+  }
+
+  if (query.brand) {
+    const brand = await prisma.brand.findUnique({ where: { slug: query.brand } });
+    if (!brand) throw new NotFoundError('Brand not found');
+    filters.push(Prisma.sql`p."brandId" = ${brand.id}`);
+  }
+
+  if (query.q) {
+    const pattern = `%${escapeIlike(query.q)}%`;
+    const escapeChar = '\\';
+    filters.push(Prisma.sql`(
+      p.name ILIKE ${pattern} ESCAPE ${escapeChar}
+      OR p.description ILIKE ${pattern} ESCAPE ${escapeChar}
+      OR EXISTS (
+        SELECT 1 FROM "ProductVariant" v2
+        WHERE v2."productId" = p.id AND v2.sku ILIKE ${pattern} ESCAPE ${escapeChar}
+      )
+    )`);
+  }
+
+  if (query.minPrice !== undefined || query.maxPrice !== undefined) {
+    filters.push(priceFilter(query.minPrice, query.maxPrice));
+  }
+
+  if (query.inStock === true) {
+    filters.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM "ProductVariant" vs
+      WHERE vs."productId" = p.id
+        AND (vs."stockQty" - vs."reservedQty") > 0
+    )`);
+  } else if (query.inStock === false) {
+    filters.push(Prisma.sql`NOT EXISTS (
+      SELECT 1 FROM "ProductVariant" vs
+      WHERE vs."productId" = p.id
+        AND (vs."stockQty" - vs."reservedQty") > 0
+    )`);
+  }
+
+  const offset = (query.page - 1) * query.pageSize;
+  const rows = await prisma.$queryRaw<{ id: string | null; total: bigint | number }[]>`
+    WITH matched AS (
+      SELECT p.id,
+             p."createdAt",
+             p.name,
+             COALESCE(
+               MIN(COALESCE(v."priceOverride", p."basePrice")),
+               p."basePrice"
+             ) AS min_price
+      FROM "Product" p
+      LEFT JOIN "ProductVariant" v ON v."productId" = p.id
+      WHERE ${Prisma.join(filters, ' AND ')}
+      GROUP BY p.id
+    ),
+    meta AS (
+      SELECT COUNT(*)::int AS total FROM matched
+    )
+    SELECT paged.id, meta.total
+    FROM meta
+    LEFT JOIN LATERAL (
+      SELECT matched.id
+      FROM matched
+      ORDER BY ${sortPrimary[query.sort]}, matched.id ASC
+      LIMIT ${query.pageSize} OFFSET ${offset}
+    ) paged ON TRUE
+  `;
+
+  const total = Number(rows[0]?.total ?? 0);
+  const ids = rows.map((r) => r.id).filter((id): id is string => id != null);
+  const totalPages = total === 0 ? 0 : Math.ceil(total / query.pageSize);
+
+  if (ids.length === 0) {
+    return { items: [], meta: { page: query.page, pageSize: query.pageSize, total, totalPages } };
+  }
+
+  const products = await prisma.product.findMany({
+    where: { id: { in: ids } },
+    include: productListInclude,
+  });
+  const byId = new Map(products.map((p) => [p.id, p]));
+  const items = ids.map((id) => {
+    const product = byId.get(id);
+    if (!product) throw new Error(`Listed product ${id} missing from follow-up query`);
+    return toCard(product);
+  });
+
+  return { items, meta: { page: query.page, pageSize: query.pageSize, total, totalPages } };
 }

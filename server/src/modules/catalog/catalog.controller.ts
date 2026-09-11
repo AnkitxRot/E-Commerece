@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import type { ProductListQuery } from '@audio-commerce/shared';
 import * as catalogService from './catalog.service.js';
 
 export async function getSettingsHandler(_req: Request, res: Response) {
@@ -19,4 +20,9 @@ export async function getCategoryBySlugHandler(req: Request, res: Response) {
 export async function getBrandsHandler(_req: Request, res: Response) {
   const brands = await catalogService.getBrands();
   res.status(200).json(brands);
+}
+
+export async function listProductsHandler(req: Request, res: Response) {
+  const result = await catalogService.listProducts(req.query as unknown as ProductListQuery);
+  res.status(200).json(result);
 }
