@@ -7,6 +7,9 @@ build/
 *.local
 .DS_Store
 coverage/
+*.tsbuildinfo
 client/dist/
 server/dist/
 shared/dist/
+.claude/worktrees/
+.claude/*.lock
