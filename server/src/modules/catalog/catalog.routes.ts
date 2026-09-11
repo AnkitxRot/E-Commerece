@@ -18,3 +18,8 @@ catalogRouter.get('/categories', asyncHandler(controller.getCategoryTreeHandler)
 catalogRouter.get('/categories/:slug', validate(catalogSlugParamSchema, 'params'), asyncHandler(controller.getCategoryBySlugHandler));
 catalogRouter.get('/brands', asyncHandler(controller.getBrandsHandler));
 catalogRouter.get('/products', validate(productListQuerySchema, 'query'), asyncHandler(controller.listProductsHandler));
+catalogRouter.get(
+  '/products/:slug',
+  validate(catalogSlugParamSchema, 'params'),
+  asyncHandler(controller.getProductBySlugHandler),
+);

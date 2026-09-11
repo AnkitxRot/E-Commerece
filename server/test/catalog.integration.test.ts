@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { productListResponseSchema } from '@audio-commerce/shared';
+import { productDetailResponseSchema, productListResponseSchema } from '@audio-commerce/shared';
 import { app } from '../src/app.js';
 import { prisma } from '../src/lib/prisma.js';
 import { resetDb } from './setup.js';
@@ -286,5 +286,225 @@ describe('GET /api/catalog/products', () => {
   it('rejects inStock=TRUE as validation error', async () => {
     const res = await request(app).get('/api/catalog/products').query({ inStock: 'TRUE' });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/catalog/products/:slug', () => {
+  beforeEach(seedProductListFixtures);
+
+  it('returns ACTIVE variants with availableQty, inStock, and priceOverride', async () => {
+    const audio = await prisma.category.findUniqueOrThrow({ where: { slug: 'audio' } });
+    const brandA = await prisma.brand.findUniqueOrThrow({ where: { slug: 'brand-a' } });
+    const product = await prisma.product.create({
+      data: {
+        slug: 'helix-lineage',
+        name: 'Helix Lineage',
+        description: 'mixed stock lineage',
+        categoryId: audio.id,
+        brandId: brandA.id,
+        basePrice: '100.00',
+        status: 'ACTIVE',
+        featured: true,
+        seoTitle: 'Helix Lineage SEO',
+        seoDescription: 'Lineage meta',
+      },
+    });
+    const later = new Date('2026-02-01T00:00:00Z');
+    const earlier = new Date('2026-01-01T00:00:00Z');
+    await prisma.productVariant.create({
+      data: {
+        productId: product.id,
+        sku: 'LIN-OVR',
+        attributes: { color: 'red' },
+        stockQty: 0,
+        reservedQty: 0,
+        createdAt: new Date('2026-03-01T00:00:00Z'),
+      },
+    });
+    await prisma.productVariant.create({
+      data: {
+        productId: product.id,
+        sku: 'LIN-SLV',
+        attributes: { color: 'silver' },
+        stockQty: 0,
+        reservedQty: 0,
+        priceOverride: '120.00',
+        createdAt: later,
+      },
+    });
+    await prisma.productVariant.create({
+      data: {
+        productId: product.id,
+        sku: 'LIN-BLK',
+        attributes: { color: 'black' },
+        stockQty: 4,
+        reservedQty: 1,
+        createdAt: earlier,
+      },
+    });
+    await prisma.productImage.create({
+      data: {
+        productId: product.id,
+        url: 'https://picsum.photos/seed/lineage-1/800/800',
+        altText: 'Lineage side',
+        position: 1,
+      },
+    });
+    await prisma.productImage.create({
+      data: {
+        productId: product.id,
+        url: 'https://picsum.photos/seed/lineage-0/800/800',
+        altText: 'Lineage front',
+        position: 0,
+      },
+    });
+
+    const res = await request(app).get('/api/catalog/products/helix-lineage');
+    expect(res.status).toBe(200);
+    const body = productDetailResponseSchema.parse(res.body);
+    expect(body.product.id).toBeUndefined();
+    expect(body.product).not.toHaveProperty('id');
+    expect(body.product).toMatchObject({
+      slug: 'helix-lineage',
+      name: 'Helix Lineage',
+      description: 'mixed stock lineage',
+      seoTitle: 'Helix Lineage SEO',
+      seoDescription: 'Lineage meta',
+      featured: true,
+      inStock: true,
+      priceFrom: '100.00',
+      priceTo: '120.00',
+      brand: { slug: 'brand-a', name: 'Brand A', logoUrl: null },
+      category: { slug: 'audio', name: 'Audio' },
+    });
+    expect(body.product.variants.map((v) => v.sku)).toEqual(['LIN-BLK', 'LIN-SLV', 'LIN-OVR']);
+    expect(body.product.variants).toEqual([
+      {
+        sku: 'LIN-BLK',
+        attributes: { color: 'black' },
+        price: '100.00',
+        inStock: true,
+        availableQty: 3,
+      },
+      {
+        sku: 'LIN-SLV',
+        attributes: { color: 'silver' },
+        price: '120.00',
+        inStock: false,
+        availableQty: 0,
+      },
+      {
+        sku: 'LIN-OVR',
+        attributes: { color: 'red' },
+        price: '100.00',
+        inStock: false,
+        availableQty: 0,
+      },
+    ]);
+    expect(body.product.images.map((img) => img.position)).toEqual([0, 1]);
+    expect(body.product.images[0]).toMatchObject({
+      url: 'https://picsum.photos/seed/lineage-0/800/800',
+      altText: 'Lineage front',
+      position: 0,
+    });
+  });
+
+  it('returns 404 for DRAFT, ARCHIVED, and missing slugs', async () => {
+    const draft = await request(app).get('/api/catalog/products/gamma');
+    expect(draft.status).toBe(404);
+    expect(draft.body.error.code).toBe('NOT_FOUND');
+
+    const audio = await prisma.category.findUniqueOrThrow({ where: { slug: 'audio' } });
+    await prisma.product.create({
+      data: {
+        slug: 'helix-classic-v1',
+        name: 'Classic V1',
+        description: 'archived classic',
+        categoryId: audio.id,
+        basePrice: '10.00',
+        status: 'ARCHIVED',
+      },
+    });
+    const archived = await request(app).get('/api/catalog/products/helix-classic-v1');
+    expect(archived.status).toBe(404);
+    expect(archived.body.error.code).toBe('NOT_FOUND');
+
+    const missing = await request(app).get('/api/catalog/products/nope');
+    expect(missing.status).toBe(404);
+    expect(missing.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('ignores client-only ?variant= and still returns the ACTIVE product', async () => {
+    const res = await request(app).get('/api/catalog/products/alpha').query({ variant: 'NOT-A-SKU' });
+    expect(res.status).toBe(200);
+    const body = productDetailResponseSchema.parse(res.body);
+    expect(body.product.slug).toBe('alpha');
+    expect(body.product.variants[0]).toMatchObject({
+      sku: 'A1',
+      price: '100.00',
+      inStock: true,
+      availableQty: 5,
+    });
+  });
+
+  it('orders tied variants by id ASC and tied images by id ASC', async () => {
+    const audio = await prisma.category.findUniqueOrThrow({ where: { slug: 'audio' } });
+    const product = await prisma.product.create({
+      data: {
+        slug: 'tied-order',
+        name: 'Tied Order',
+        description: 'stable ties',
+        categoryId: audio.id,
+        basePrice: '10.00',
+        status: 'ACTIVE',
+      },
+    });
+    const createdAt = new Date('2026-01-01T00:00:00Z');
+    const v1 = await prisma.productVariant.create({
+      data: {
+        productId: product.id,
+        sku: 'TIE-A',
+        attributes: { color: 'black' },
+        stockQty: 1,
+        reservedQty: 0,
+        createdAt,
+      },
+    });
+    const v2 = await prisma.productVariant.create({
+      data: {
+        productId: product.id,
+        sku: 'TIE-B',
+        attributes: { color: 'silver' },
+        stockQty: 1,
+        reservedQty: 0,
+        createdAt,
+      },
+    });
+    await prisma.productVariant.update({ where: { id: v1.id }, data: { createdAt } });
+    await prisma.productVariant.update({ where: { id: v2.id }, data: { createdAt } });
+    const img1 = await prisma.productImage.create({
+      data: {
+        productId: product.id,
+        url: 'https://picsum.photos/seed/tie-a/800/800',
+        altText: 'Tie A',
+        position: 0,
+      },
+    });
+    const img2 = await prisma.productImage.create({
+      data: {
+        productId: product.id,
+        url: 'https://picsum.photos/seed/tie-b/800/800',
+        altText: 'Tie B',
+        position: 0,
+      },
+    });
+
+    const res = await request(app).get('/api/catalog/products/tied-order');
+    expect(res.status).toBe(200);
+    const body = productDetailResponseSchema.parse(res.body);
+    const expectedSkus = [v1, v2].sort((a, b) => a.id.localeCompare(b.id)).map((v) => v.sku);
+    const expectedAlts = [img1, img2].sort((a, b) => a.id.localeCompare(b.id)).map((img) => img.altText);
+    expect(body.product.variants.map((v) => v.sku)).toEqual(expectedSkus);
+    expect(body.product.images.map((img) => img.altText)).toEqual(expectedAlts);
   });
 });

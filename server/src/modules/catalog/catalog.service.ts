@@ -5,6 +5,7 @@ import type {
   CategoriesResponse,
   CategoryDetailDto,
   CategoryTreeNode,
+  ProductDetailDto,
   ProductListQuery,
   ProductListResponse,
   StoreSettingsDto,
@@ -13,7 +14,7 @@ import { NotFoundError } from '../../errors/AppError.js';
 import { prisma } from '../../lib/prisma.js';
 import { resolveCategoryAndDescendantIds } from './categoryTree.js';
 import { escapeIlike } from './ilike.js';
-import { toCard } from './mapProduct.js';
+import { toCard, toDetail } from './mapProduct.js';
 
 type Row = { id: string; slug: string; name: string; parentId: string | null };
 
@@ -209,4 +210,18 @@ export async function listProducts(query: ProductListQuery): Promise<ProductList
   });
 
   return { items, meta: { page: query.page, pageSize: query.pageSize, total, totalPages } };
+}
+
+export async function getProductBySlug(slug: string): Promise<ProductDetailDto> {
+  const product = await prisma.product.findFirst({
+    where: { slug, status: 'ACTIVE' },
+    include: {
+      brand: true,
+      category: true,
+      variants: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
+      images: { orderBy: [{ position: 'asc' }, { id: 'asc' }] },
+    },
+  });
+  if (!product) throw new NotFoundError('Product not found');
+  return toDetail(product);
 }

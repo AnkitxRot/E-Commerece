@@ -26,3 +26,8 @@ export async function listProductsHandler(req: Request, res: Response) {
   const result = await catalogService.listProducts(req.query as unknown as ProductListQuery);
   res.status(200).json(result);
 }
+
+export async function getProductBySlugHandler(req: Request, res: Response) {
+  const product = await catalogService.getProductBySlug(req.params.slug);
+  res.status(200).json({ product });
+}
