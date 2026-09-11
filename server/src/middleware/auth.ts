@@ -4,6 +4,8 @@ import { UnauthorizedError, ForbiddenError } from '../errors/AppError.js';
 import type { Role } from '@audio-commerce/shared';
 
 declare global {
+  // Express request augmentation requires a namespace merge.
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: { id: string; role: Role };

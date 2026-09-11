@@ -1,6 +1,5 @@
 export function reportError(error: unknown, context?: Record<string, unknown>): void {
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
     console.error('Unhandled UI error', error, context);
   }
   // Production: intentionally silent here. A future phase may forward this

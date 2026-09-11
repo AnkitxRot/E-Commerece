@@ -20,7 +20,7 @@ describe('admin route RBAC', () => {
   });
 
   it('allows an ADMIN through', async () => {
-    const registerRes = await request(app).post('/api/auth/register').send({ email: 'admin2@example.com', password: 'password123', name: 'A' });
+    await request(app).post('/api/auth/register').send({ email: 'admin2@example.com', password: 'password123', name: 'A' });
     await prisma.user.update({ where: { email: 'admin2@example.com' }, data: { role: 'ADMIN' } });
     // The token minted at register time still carries the CUSTOMER role claim,
     // so re-authenticate to get a token that reflects the updated role.
