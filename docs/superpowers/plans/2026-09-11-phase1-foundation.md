@@ -24,6 +24,12 @@
 - No storefront browsing/cart/checkout/order/admin-CRUD business logic in this phase — placeholder pages only, proving the auth/routing/RBAC plumbing works end-to-end.
 - Every table gets `createdAt`/`updatedAt` (per spec's per-entity list) and the indexes/unique constraints listed in the spec's Data Model section.
 - Inventory stock decrement must use the conditional `updateMany` pattern from the spec (never read-then-write), inside a `$transaction`.
+- Refresh-token rotation (revoke-old + create-new) runs inside a single `$transaction`, preserving the conditional `revokedAt: null` race guard.
+- Client-side token refresh is single-flight: concurrent 401s and duplicate auth-init calls (React StrictMode double-invoking effects) share exactly one in-flight `/api/auth/refresh` call, never two — two concurrent raw refresh calls would each try to rotate the same token and one would look like reuse.
+- Automatic client-side refresh-and-retry triggers only for ordinary authenticated calls (e.g. `/api/auth/me`, later protected endpoints). It must never trigger for failed `/api/auth/login`, `/api/auth/register`, `/api/auth/refresh`, or `/api/auth/logout` calls themselves.
+- Integration tests never run against the development database. A dedicated `audio_commerce_test` database (selected via `NODE_ENV=test` loading `server/.env.test`) is required, and `resetDb()` refuses to run when `NODE_ENV !== 'test'`.
+- Stale-role tradeoff (documented, not implicit): `requireRole` trusts the `role` claim baked into the access JWT at the moment it was signed; it does not re-query the database per request. Every refresh re-derives the claim from the live `User.role`, so a role change propagates within one access-token lifetime — **at most 15 minutes**, and immediately for a fresh login. This is an accepted Phase 1 tradeoff (avoids a DB round-trip on every authenticated request for a two-role model); a later phase may revisit it if a more sensitive permission model is introduced.
+- Demo seed credentials are never hardcoded as usable secrets: passwords come from `SEED_ADMIN_PASSWORD`/`SEED_CUSTOMER_PASSWORD` env vars (falling back to a clearly-labeled shared dev-only default with a console warning), and the seed script refuses to run when `NODE_ENV=production`.
 
 ---
 
@@ -47,6 +53,7 @@
 /server/package.json
 /server/tsconfig.json
 /server/.env.example
+/server/.env.test.example         template for the isolated test-database env file
 /server/prisma/schema.prisma
 /server/prisma/migrations/...       generated + hand-edited check constraints
 /server/prisma/seed.ts
@@ -86,6 +93,7 @@
 /client/src/styles/index.css
 /client/src/lib/apiClient.ts
 /client/src/context/AuthContext.tsx
+/client/src/context/AuthContext.test.tsx
 /client/src/context/ToastContext.tsx
 /client/src/components/Button.tsx
 /client/src/components/Input.tsx
@@ -94,6 +102,7 @@
 /client/src/components/EmptyState.tsx
 /client/src/components/ErrorState.tsx
 /client/src/components/LoadingState.tsx
+/client/src/lib/errorReporter.ts    console.error only in dev; production-safe abstraction point
 /client/src/components/ErrorBoundary.tsx
 /client/src/components/ProtectedRoute.tsx
 /client/src/layouts/RootLayout.tsx
@@ -155,6 +164,8 @@ node_modules/
 dist/
 build/
 .env
+.env.test
+.env.*.local
 *.local
 .DS_Store
 coverage/
@@ -254,7 +265,8 @@ git commit -m "chore: scaffold npm workspaces monorepo and tooling"
   },
   "devDependencies": {
     "typescript": "^5.6.2",
-    "vitest": "^2.1.1"
+    "vitest": "^2.1.1",
+    "@types/node": "^22.5.5"
   }
 }
 ```
@@ -357,7 +369,12 @@ export * from './schemas/auth.js';
 ```ts
 import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+// `import.meta.dirname` needs Node 21+; `fileURLToPath(import.meta.url)` works
+// on every ESM Node runtime this project targets, so use that instead.
+const currentDir = dirname(fileURLToPath(import.meta.url));
 
 const FORBIDDEN = ['@prisma/client', 'express', "from 'fs'", "from 'node:fs'", 'process.env'];
 
@@ -371,7 +388,7 @@ function walk(dir: string): string[] {
 
 describe('shared package stays environment-agnostic', () => {
   it('never imports Prisma, Express, Node fs, or process.env', () => {
-    const files = walk(join(import.meta.dirname, '.'));
+    const files = walk(join(currentDir, '.'));
     for (const file of files) {
       const content = readFileSync(file, 'utf-8');
       for (const banned of FORBIDDEN) {
@@ -421,8 +438,9 @@ git commit -m "feat(shared): add enums, auth zod schemas, and env-agnostic impor
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run",
+    "test": "cross-env NODE_ENV=test vitest run",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:test": "dotenv -e .env.test -- npx prisma migrate deploy",
     "prisma:generate": "prisma generate",
     "prisma:seed": "tsx prisma/seed.ts"
   },
@@ -436,7 +454,8 @@ git commit -m "feat(shared): add enums, auth zod schemas, and env-agnostic impor
     "bcrypt": "^5.1.1",
     "jsonwebtoken": "^9.0.2",
     "express-rate-limit": "^7.4.0",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "prisma": "^5.19.1",
@@ -444,6 +463,8 @@ git commit -m "feat(shared): add enums, auth zod schemas, and env-agnostic impor
     "tsx": "^4.19.1",
     "vitest": "^2.1.1",
     "supertest": "^7.0.0",
+    "cross-env": "^7.0.3",
+    "dotenv-cli": "^7.4.2",
     "@types/express": "^4.17.21",
     "@types/cors": "^2.8.17",
     "@types/cookie-parser": "^1.4.7",
@@ -455,6 +476,8 @@ git commit -m "feat(shared): add enums, auth zod schemas, and env-agnostic impor
 }
 ```
 
+`dotenv` is a runtime dependency (loaded by `src/config/env.ts`, which the running server and every test import); `dotenv-cli`/`cross-env` are dev-only, used by the scripts above to point the Prisma CLI and Vitest at the isolated test database.
+
 - [ ] **Step 2: `server/tsconfig.json`**
 
 ```json
@@ -465,7 +488,20 @@ git commit -m "feat(shared): add enums, auth zod schemas, and env-agnostic impor
 }
 ```
 
-- [ ] **Step 3: `server/.env.example`** (copy of root `.env.example`; this is the file actually read by `server/.env` in dev)
+- [ ] **Step 3: `server/.env.example`** (this is the file actually read by `server/.env` in dev; adds two optional seed-only vars beyond the root template)
+
+```
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/audio_commerce
+JWT_ACCESS_SECRET=replace-with-a-long-random-string
+PORT=4000
+CLIENT_ORIGIN=http://localhost:5173
+NODE_ENV=development
+
+# Optional: override the demo seed's passwords (Step 10 below). Leave blank
+# to use a clearly-labeled, publicly-documented dev-only default.
+SEED_ADMIN_PASSWORD=
+SEED_CUSTOMER_PASSWORD=
+```
 
 - [ ] **Step 4: `server/prisma/schema.prisma`**
 
@@ -809,6 +845,26 @@ model AuditLog {
 Run: `cp .env.example .env` (in `server/`), edit `DATABASE_URL` to a reachable local database (e.g. `audio_commerce`, created with `createdb audio_commerce` or via your Postgres client).
 Expected: `server/.env` exists with a valid connection string. (`.env` is gitignored.)
 
+- [ ] **Step 5b: Create `server/.env.test.example` and a real isolated test database**
+
+Integration tests call `resetDb()` (Task 6), which deletes rows across most tables. That must never run against the development database. Create a second, physically separate database and a matching env file so tests are pointed at it deterministically.
+
+`server/.env.test.example`:
+
+```
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/audio_commerce_test
+NODE_ENV=test
+JWT_ACCESS_SECRET=test-only-secret-not-used-in-prod-16chars-min
+CLIENT_ORIGIN=http://localhost:5173
+```
+
+Run:
+```
+createdb audio_commerce_test
+cp .env.test.example .env.test   # in server/, then adjust DATABASE_URL if needed
+```
+Expected: `audio_commerce_test` exists as a distinct database from `audio_commerce`; `server/.env.test` exists and is gitignored.
+
 - [ ] **Step 6: Create the migration without applying it, so check constraints can be added**
 
 Run: `cd server && npx prisma migrate dev --name init --create-only`
@@ -826,39 +882,49 @@ ALTER TABLE "Review" ADD CONSTRAINT "Review_rating_check" CHECK ("rating" >= 1 A
 ALTER TABLE "StoreSettings" ADD CONSTRAINT "StoreSettings_singleton_check" CHECK ("id" = 'singleton');
 ```
 
-- [ ] **Step 8: Apply the migration**
+- [ ] **Step 8: Apply the migration to both databases**
 
-Run: `npx prisma migrate dev`
-Expected: migration applies cleanly, `npx prisma validate` reports the schema is valid.
+Run: `npx prisma migrate dev` (applies to `server/.env`'s `audio_commerce`)
+Run: `npm run prisma:migrate:test -w server` (applies the same migration to `audio_commerce_test` via `.env.test`)
+Expected: both apply cleanly; `npx prisma validate` reports the schema is valid.
 
 - [ ] **Step 9: Generate Prisma Client**
 
 Run: `npx prisma generate`
 Expected: `@prisma/client` types regenerated, importable as `import { PrismaClient } from '@prisma/client'`.
 
-- [ ] **Step 10: Verify constraints actually reject bad data**
+Check-constraint behavior is verified deterministically by an automated test in Task 6 (`inventory.integration.test.ts`), which attempts a direct Prisma write that violates the `stockQty >= 0` constraint against the real (test) database and asserts Postgres rejects it — not by an ad hoc manual command here.
 
-Run a one-off check (not a permanent test file — this is a manual sanity check before writing the real seed):
-`npx prisma db execute --stdin <<< "INSERT INTO \"ProductVariant\" (id, \"productId\", sku, attributes, \"stockQty\") VALUES ('x','x','x','{}', -1);"`
-Expected: fails with a check-constraint violation (this will also fail on the missing FK first if run against an empty DB — the point is confirming the constraint clause parsed and attached; a full behavioral test happens in Task 6's inventory test).
-
-- [ ] **Step 11: `server/prisma/seed.ts`** — creates one demo admin and one demo customer (both clearly labeled, no business data yet — catalog seeding is Phase 2's job)
+- [ ] **Step 10: `server/prisma/seed.ts`** — creates one demo admin and one demo customer (both clearly labeled, no business data yet — catalog seeding is Phase 2's job). Passwords are never hardcoded as a usable secret: they come from env vars, with a clearly-labeled dev-only fallback, and the script refuses to run in production.
 
 ```ts
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
+const DEV_ONLY_DEFAULT_PASSWORD = 'ChangeMe!Dev123';
 
 async function main() {
-  const passwordHash = await bcrypt.hash('DemoPass123!', 12);
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('Refusing to run the demo seed against a production environment.');
+  }
+
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? DEV_ONLY_DEFAULT_PASSWORD;
+  const customerPassword = process.env.SEED_CUSTOMER_PASSWORD ?? DEV_ONLY_DEFAULT_PASSWORD;
+
+  if (!process.env.SEED_ADMIN_PASSWORD || !process.env.SEED_CUSTOMER_PASSWORD) {
+    console.warn(
+      '[seed] SEED_ADMIN_PASSWORD / SEED_CUSTOMER_PASSWORD not set in server/.env — using a shared, ' +
+        'publicly-documented development-only password. Never reuse these demo accounts outside local development.',
+    );
+  }
 
   await prisma.user.upsert({
     where: { email: 'admin@audiocommerce.demo' },
     update: {},
     create: {
       email: 'admin@audiocommerce.demo',
-      passwordHash,
+      passwordHash: await bcrypt.hash(adminPassword, 12),
       name: 'Demo Admin',
       role: 'ADMIN',
     },
@@ -869,7 +935,7 @@ async function main() {
     update: {},
     create: {
       email: 'customer@audiocommerce.demo',
-      passwordHash,
+      passwordHash: await bcrypt.hash(customerPassword, 12),
       name: 'Demo Customer',
       role: 'CUSTOMER',
     },
@@ -895,16 +961,18 @@ main()
   });
 ```
 
-- [ ] **Step 12: Run the seed**
+- [ ] **Step 11: Run the seed and record the demo credentials**
 
 Run: `npm run prisma:seed -w server`
-Expected: completes without error; `SELECT * FROM "User";` shows the two demo rows; `SELECT * FROM "StoreSettings";` shows exactly one row.
+Expected: completes without error; if the env vars were unset, the console warning above prints. `SELECT * FROM "User";` shows the two demo rows; `SELECT * FROM "StoreSettings";` shows exactly one row.
 
-- [ ] **Step 13: Commit**
+Demo accounts (documented here, not just implied): `admin@audiocommerce.demo` / `customer@audiocommerce.demo`, password is whatever `SEED_ADMIN_PASSWORD`/`SEED_CUSTOMER_PASSWORD` were set to, or `ChangeMe!Dev123` if unset. These exist only in local/dev databases — the seed script's production guard (Step 10) prevents them ever landing in a production database via this script.
+
+- [ ] **Step 12: Commit**
 
 ```bash
-git add server/package.json server/tsconfig.json server/prisma
-git commit -m "feat(server): add Prisma schema, check-constraint migration, and demo seed"
+git add server/package.json server/tsconfig.json server/prisma server/.env.test.example
+git commit -m "feat(server): add Prisma schema, check-constraint migration, isolated test DB config, demo seed"
 ```
 
 ---
@@ -920,8 +988,13 @@ git commit -m "feat(server): add Prisma schema, check-constraint migration, and 
 
 - [ ] **Step 1: `server/src/config/env.ts`**
 
+`NODE_ENV` decides which env file loads — `server/.env.test` in tests (see Task 3, Step 5b), `server/.env` otherwise — so integration tests read `DATABASE_URL=...audio_commerce_test`, never the development database. `cross-env NODE_ENV=test` (Task 3's `test` script) sets `process.env.NODE_ENV` before this module ever runs, so the choice is made correctly on the very first import.
+
 ```ts
+import { config } from 'dotenv';
 import { z } from 'zod';
+
+config({ path: process.env.NODE_ENV === 'test' ? '.env.test' : '.env' });
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
@@ -938,6 +1011,7 @@ export const env = envSchema.parse(process.env);
 
 ```ts
 import { PrismaClient } from '@prisma/client';
+import '../config/env.js'; // side effect: loads the correct .env/.env.test before Prisma reads DATABASE_URL
 
 export const prisma = new PrismaClient();
 ```
@@ -1216,19 +1290,41 @@ git commit -m "feat(server): add password hashing, JWT access tokens, refresh to
 
 This task requires a real Postgres test database (same instance as dev is fine for Phase 1; `server/test/setup.ts` truncates relevant tables between tests rather than requiring a second database).
 
-- [ ] **Step 1: `server/test/setup.ts`** — shared helper other integration tests (Task 8) also import
+- [ ] **Step 1: `server/test/setup.ts`** — shared helper other integration tests (Task 9) also import
 
 ```ts
 import { prisma } from '../src/lib/prisma.js';
+import { env } from '../src/config/env.js';
 
+/**
+ * Deletes rows across nearly every table. Only ever safe against the
+ * isolated test database — refuses to run otherwise so a misconfigured
+ * environment can never wipe development data.
+ */
 export async function resetDb() {
+  if (env.NODE_ENV !== 'test') {
+    throw new Error('resetDb() may only run when NODE_ENV=test (isolated test database).');
+  }
+  // Deleted in FK-dependency order: children before parents.
   await prisma.$transaction([
-    prisma.refreshToken.deleteMany(),
+    prisma.auditLog.deleteMany(),
+    prisma.orderItem.deleteMany(),
+    prisma.order.deleteMany(),
+    prisma.review.deleteMany(),
+    prisma.wishlistItem.deleteMany(),
+    prisma.wishlist.deleteMany(),
     prisma.cartItem.deleteMany(),
+    prisma.cart.deleteMany(),
+    prisma.productImage.deleteMany(),
     prisma.productVariant.deleteMany(),
     prisma.product.deleteMany(),
     prisma.category.deleteMany(),
+    prisma.brand.deleteMany(),
+    prisma.address.deleteMany(),
+    prisma.refreshToken.deleteMany(),
     prisma.user.deleteMany(),
+    prisma.coupon.deleteMany(),
+    prisma.contentBlock.deleteMany(),
   ]);
 }
 
@@ -1301,8 +1397,21 @@ describe('decrementStock', () => {
     const updated = await prisma.productVariant.findUniqueOrThrow({ where: { id: variant.id } });
     expect(updated.stockQty).toBe(0);
   });
+
+  it('rejects a negative stockQty at the database level even bypassing the service (check constraint)', async () => {
+    const variant = await createTestVariant(5);
+    // Deliberately bypasses decrementStock to prove the DB constraint itself
+    // is the backstop, not just the application-layer guard above.
+    await expect(
+      prisma.productVariant.update({ where: { id: variant.id }, data: { stockQty: -1 } }),
+    ).rejects.toThrow();
+    const unchanged = await prisma.productVariant.findUniqueOrThrow({ where: { id: variant.id } });
+    expect(unchanged.stockQty).toBe(5);
+  });
 });
 ```
+
+This test requires `server/.env.test`'s `audio_commerce_test` database to already have the migration from Task 3 (Steps 6-8) applied, including the hand-added `CHECK ("stockQty" >= 0)` constraint — otherwise this specific assertion would fail while every other test in this file still passes, which is itself a useful signal that the migration didn't reach the test database.
 
 - [ ] **Step 3: Run to verify it fails**
 
@@ -1333,7 +1442,7 @@ export async function decrementStock(
 - [ ] **Step 5: Run to verify it passes**
 
 Run: `npm run test -w server`
-Expected: PASS (3 tests). The conditional `updateMany` means Postgres's row-level locking serializes the two concurrent transactions in the third test — the second one re-reads a `stockQty` of `0` and its `WHERE stockQty >= 1` clause matches zero rows.
+Expected: PASS (4 tests). The conditional `updateMany` means Postgres's row-level locking serializes the two concurrent transactions in the third test — the second one re-reads a `stockQty` of `0` and its `WHERE stockQty >= 1` clause matches zero rows.
 
 - [ ] **Step 6: Commit**
 
@@ -1353,7 +1462,7 @@ git commit -m "feat(server): add atomic inventory decrement with concurrent-requ
 - Consumes: `prisma`, `hashPassword`/`verifyPassword`, `signAccessToken`, `generateRefreshToken`/`hashRefreshToken`/`REFRESH_TOKEN_TTL_MS`, `ConflictError`/`UnauthorizedError` (all prior tasks).
 - Produces: `register(input: RegisterInput): Promise<{user, accessToken, refreshToken}>`, `login(input: LoginInput): Promise<{user, accessToken, refreshToken}>`, `refresh(rawToken: string): Promise<{accessToken, refreshToken}>`, `logout(rawToken: string): Promise<void>` — consumed by `auth.controller.ts` (Task 9). `refreshToken` here is always the new **raw** value the controller must set as the cookie.
 
-No new tests in this task — `auth.service.ts` is exercised through the HTTP integration tests in Task 9, which test real client-visible behavior (status codes, cookies) rather than internals.
+No new tests in this task — `auth.service.ts` is exercised through the HTTP integration tests in Task 9, which test real client-visible behavior (status codes, cookies) rather than internals. Two correctness properties baked in here that Task 9's tests rely on: (1) rotation's revoke-old/create-new pair runs inside one `$transaction`, so a crash mid-rotation cannot strand a revoked token with no replacement; (2) both `refresh()` and `getUserById()` convert a missing/deleted user into `UnauthorizedError` (401), never a raw Prisma not-found exception surfacing as a 500.
 
 - [ ] **Step 1: `server/src/modules/auth/auth.service.ts`**
 
@@ -1405,6 +1514,13 @@ export async function login(input: LoginInput) {
   return { user: toUserDto(user), ...tokens };
 }
 
+async function revokeFamily(familyId: string) {
+  await prisma.refreshToken.updateMany({
+    where: { familyId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+}
+
 export async function refresh(rawToken: string) {
   const tokenHash = hashRefreshToken(rawToken);
   const existing = await prisma.refreshToken.findUnique({ where: { tokenHash } });
@@ -1413,41 +1529,53 @@ export async function refresh(rawToken: string) {
 
   if (existing.revokedAt) {
     // Reuse of an already-rotated token: assume compromise, kill the whole family.
-    await prisma.refreshToken.updateMany({
-      where: { familyId: existing.familyId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await revokeFamily(existing.familyId);
     throw new UnauthorizedError('Session invalid, please log in again');
   }
 
-  const user = await prisma.user.findUniqueOrThrow({ where: { id: existing.userId } });
+  const user = await prisma.user.findUnique({ where: { id: existing.userId } });
+  if (!user) {
+    // The user was deleted after this token was issued — never leak that as a 500.
+    await revokeFamily(existing.familyId);
+    throw new UnauthorizedError('Session invalid, please log in again');
+  }
+
   const newRawToken = generateRefreshToken();
   const newTokenHash = hashRefreshToken(newRawToken);
 
-  // Conditional revoke: if two requests race on the same not-yet-revoked token,
-  // only one succeeds here; the loser's `count === 0` means someone already
-  // rotated this token, so it is treated the same as replay-of-a-revoked-token.
-  const rotated = await prisma.refreshToken.updateMany({
-    where: { id: existing.id, revokedAt: null },
-    data: { revokedAt: new Date(), replacedByTokenHash: newTokenHash },
-  });
-  if (rotated.count === 0) {
-    await prisma.refreshToken.updateMany({
-      where: { familyId: existing.familyId, revokedAt: null },
-      data: { revokedAt: new Date() },
+  // Revoke-old + create-new happen atomically: either both land, or neither
+  // does, so a crash mid-rotation can never leave a revoked token with no
+  // replacement. The `revokedAt: null` guard inside the same transaction is
+  // still what makes concurrent-refresh-of-the-same-token safe (see below).
+  let rotatedCount = 0;
+  await prisma.$transaction(async (tx) => {
+    const rotated = await tx.refreshToken.updateMany({
+      where: { id: existing.id, revokedAt: null },
+      data: { revokedAt: new Date(), replacedByTokenHash: newTokenHash },
     });
+    rotatedCount = rotated.count;
+    if (rotatedCount === 0) return; // handled after the transaction commits/rolls back
+    await tx.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash: newTokenHash,
+        familyId: existing.familyId,
+        expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
+      },
+    });
+  });
+
+  if (rotatedCount === 0) {
+    // Two requests raced on the same not-yet-revoked token; the loser's
+    // `count === 0` means someone else already rotated it a moment ago —
+    // treated the same as replay-of-a-revoked-token (family-wide revoke).
+    await revokeFamily(existing.familyId);
     throw new UnauthorizedError('Session invalid, please log in again');
   }
 
-  await prisma.refreshToken.create({
-    data: {
-      userId: user.id,
-      tokenHash: newTokenHash,
-      familyId: existing.familyId,
-      expiresAt: new Date(Date.now() + REFRESH_TOKEN_TTL_MS),
-    },
-  });
-
+  // Re-derive the role from the live row (not a cached value) so a role
+  // change reaches the client's next refresh — see the documented stale-role
+  // tradeoff in the plan's Global Constraints.
   const accessToken = signAccessToken({ sub: user.id, role: user.role });
   return { accessToken, refreshToken: newRawToken };
 }
@@ -1461,7 +1589,12 @@ export async function logout(rawToken: string) {
 }
 
 export async function getUserById(id: string): Promise<UserDto> {
-  const user = await prisma.user.findUniqueOrThrow({ where: { id } });
+  const user = await prisma.user.findUnique({ where: { id } });
+  if (!user) {
+    // The JWT's subject no longer exists (deleted between issuance and use) —
+    // this is an auth failure from the caller's perspective, never a 500.
+    throw new UnauthorizedError('Session invalid, please log in again');
+  }
   return toUserDto(user);
 }
 ```
@@ -1517,6 +1650,15 @@ export const requireAuth: RequestHandler = (req: Request, _res: Response, next: 
   }
 };
 
+/**
+ * Trusts the `role` claim baked into the access JWT at sign time — it does
+ * NOT re-query the database per request. `auth.service.ts#refresh` re-derives
+ * the claim from the live `User.role` on every rotation, so a role change
+ * (e.g. an admin demoted) takes effect within one access-token lifetime — at
+ * most 15 minutes, immediately on next login. This is a deliberate, accepted
+ * Phase 1 tradeoff for a two-role model, not an oversight: revisit only if a
+ * more sensitive permission model is introduced later.
+ */
 export function requireRole(role: Role): RequestHandler {
   return (req: Request, _res: Response, next: NextFunction) => {
     if (!req.user) return next(new UnauthorizedError());
@@ -2120,12 +2262,14 @@ export default {
 
 - [ ] **Step 4: Update `client/src/styles/index.css`**
 
+CSS requires `@import` rules to precede every other statement in a stylesheet — an `@import` placed after `@tailwind` directives is invalid and gets silently dropped by the build, which would leave every `var(--color-*)` reference unresolved. `tokens.css` is imported first for that reason.
+
 ```css
+@import './tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
-
-@import './tokens.css';
 
 body {
   background-color: var(--color-bg);
@@ -2161,7 +2305,7 @@ git commit -m "feat(client): add design token foundation and Tailwind integratio
 - Test: `client/src/test/setup.ts`, `client/src/lib/apiClient.test.ts`
 
 **Interfaces:**
-- Produces: `setAccessToken(token: string | null): void`, `apiFetch<T>(path: string, options?: RequestInit): Promise<T>` (throws `ApiError` with `{status, code, message}` on non-2xx; on a 401 from a non-auth endpoint, attempts one `/api/auth/refresh` and retries once) — consumed by `AuthContext` (Task 13) and every later data-fetching hook.
+- Produces: `setAccessToken(token: string | null): void`, `refreshAccessToken(): Promise<string>` (single-flight — concurrent callers share one in-flight `/api/auth/refresh` request), `apiFetch<T>(path: string, options?: RequestInit): Promise<T>` (throws `ApiError` with `{status, code, message}` on non-2xx; on a 401 from an eligible endpoint, calls `refreshAccessToken()` and retries once) — consumed by `AuthContext` (Task 13) and every later data-fetching hook. `refreshAccessToken` is exported separately so `AuthContext`'s mount-time session check goes through the *same* single-flight gate as `apiFetch`'s automatic retry, which is what makes concurrent 401s and React StrictMode's double-invoked effects safe (see Task 13).
 
 - [ ] **Step 1: `client/src/test/setup.ts`**
 
@@ -2173,7 +2317,7 @@ import '@testing-library/jest-dom/vitest';
 
 ```ts
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { apiFetch, setAccessToken, ApiError } from './apiClient.js';
+import { apiFetch, setAccessToken, refreshAccessToken, ApiError } from './apiClient.js';
 
 describe('apiFetch', () => {
   beforeEach(() => {
@@ -2215,10 +2359,50 @@ describe('apiFetch', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3); // original, refresh, retry
   });
 
-  it('does not attempt refresh when the failing call is the refresh endpoint itself', async () => {
+  it.each(['/api/auth/login', '/api/auth/register', '/api/auth/refresh', '/api/auth/logout'])(
+    'does not attempt refresh when %s itself fails with 401',
+    async (path) => {
+      const fetchMock = fetch as ReturnType<typeof vi.fn>;
+      fetchMock.mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'nope' } }), { status: 401 }),
+      );
+      await expect(apiFetch(path, { method: 'POST' })).rejects.toBeInstanceOf(ApiError);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('shares exactly one in-flight refresh across concurrent 401s', async () => {
     const fetchMock = fetch as ReturnType<typeof vi.fn>;
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'no cookie' } }), { status: 401 }));
-    await expect(apiFetch('/api/auth/refresh', { method: 'POST' })).rejects.toBeInstanceOf(ApiError);
+    const unauthorized = () =>
+      Promise.resolve(new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'expired' } }), { status: 401 }));
+    const ok = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
+
+    // Each protected path returns 401 exactly once, then succeeds — models a
+    // genuinely expired access token that a single refresh should fix for both.
+    let protectedACalls = 0;
+    let protectedBCalls = 0;
+    fetchMock.mockImplementation((path: string) => {
+      if (path === '/api/protected-a') return ++protectedACalls === 1 ? unauthorized() : ok({ from: 'a' });
+      if (path === '/api/protected-b') return ++protectedBCalls === 1 ? unauthorized() : ok({ from: 'b' });
+      if (path === '/api/auth/refresh') return ok({ accessToken: 'new-token' });
+      throw new Error(`unexpected path in test: ${path}`);
+    });
+
+    const [a, b] = await Promise.all([apiFetch('/api/protected-a'), apiFetch('/api/protected-b')]);
+    expect(a).toEqual({ from: 'a' });
+    expect(b).toEqual({ from: 'b' });
+
+    const refreshCalls = fetchMock.mock.calls.filter(([path]) => path === '/api/auth/refresh');
+    expect(refreshCalls).toHaveLength(1);
+  });
+
+  it('refreshAccessToken() itself is single-flight when called concurrently', async () => {
+    const fetchMock = fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ accessToken: 'tok' }), { status: 200 }));
+
+    const [a, b] = await Promise.all([refreshAccessToken(), refreshAccessToken()]);
+    expect(a).toBe('tok');
+    expect(b).toBe('tok');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
@@ -2249,6 +2433,12 @@ export function setAccessToken(token: string | null) {
   accessToken = token;
 }
 
+// Endpoints whose own 401 must never trigger an automatic refresh-and-retry:
+// a failed login/register attempt is a normal rejected credential, not an
+// expired session; a failed refresh/logout must not recursively try to
+// refresh itself.
+const NEVER_AUTO_REFRESH = new Set(['/api/auth/login', '/api/auth/register', '/api/auth/refresh', '/api/auth/logout']);
+
 async function rawFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     ...options,
@@ -2268,16 +2458,34 @@ async function rawFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   return res.json();
 }
 
+// Single-flight: refresh tokens rotate on every use, so two concurrent raw
+// calls to /api/auth/refresh would race to rotate the same token — the loser
+// looks identical to a replay and trips reuse detection. Every caller
+// (apiFetch's automatic retry, AuthContext's mount-time check, including its
+// duplicate invocation under React StrictMode) goes through this one gate,
+// so only one real network call to /api/auth/refresh is ever in flight.
+let refreshInFlight: Promise<string> | null = null;
+
+export function refreshAccessToken(): Promise<string> {
+  if (!refreshInFlight) {
+    refreshInFlight = rawFetch<{ accessToken: string }>('/api/auth/refresh', { method: 'POST' })
+      .then(({ accessToken: newToken }) => {
+        setAccessToken(newToken);
+        return newToken;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   try {
     return await rawFetch<T>(path, options);
   } catch (err) {
-    const isRefreshCall = path === '/api/auth/refresh';
-    if (err instanceof ApiError && err.status === 401 && !isRefreshCall) {
-      const { accessToken: newToken } = await rawFetch<{ accessToken: string }>('/api/auth/refresh', {
-        method: 'POST',
-      });
-      setAccessToken(newToken);
+    if (err instanceof ApiError && err.status === 401 && !NEVER_AUTO_REFRESH.has(path)) {
+      await refreshAccessToken();
       return rawFetch<T>(path, options);
     }
     throw err;
@@ -2288,13 +2496,13 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}): Prom
 - [ ] **Step 5: Run to verify it passes**
 
 Run: `npm run test -w client`
-Expected: PASS (4 tests).
+Expected: PASS (9 tests: token attachment, error mapping, single retry, 4 excluded-path cases, single-flight-under-concurrent-401s, single-flight-under-direct-concurrent-calls).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add client/src/lib/apiClient.ts client/src/test/setup.ts client/src/lib/apiClient.test.ts client/vite.config.ts
-git commit -m "feat(client): add API client with in-memory access token and transparent refresh"
+git commit -m "feat(client): add API client with single-flight refresh and correct 401-retry scope"
 ```
 
 ---
@@ -2305,15 +2513,83 @@ git commit -m "feat(client): add API client with in-memory access token and tran
 - Create: `client/src/context/AuthContext.tsx`, `client/src/context/ToastContext.tsx`
 
 **Interfaces:**
-- Consumes: `apiFetch`, `setAccessToken` (Task 12); `UserDto`, `RegisterInput`, `LoginInput` (`@audio-commerce/shared`).
+- Consumes: `apiFetch`, `setAccessToken`, `refreshAccessToken` (Task 12); `UserDto`, `RegisterInput`, `LoginInput` (`@audio-commerce/shared`).
 - Produces: `useAuth(): {user: UserDto | null, status: 'idle'|'loading'|'authenticated'|'unauthenticated', login(input), register(input), logout()}`; `useToast(): {show(message: string, variant?: 'success'|'error'): void}` — consumed by `ProtectedRoute`, `LoginPage`, `RegisterPage`, `Toast` component (Tasks 14-16).
 
-- [ ] **Step 1: `client/src/context/AuthContext.tsx`**
+The mount-time session check is the concurrency-sensitive part: it must call `refreshAccessToken()` (Task 12's single-flight function), not a raw `apiFetch('/api/auth/refresh')`. React 18 StrictMode double-invokes effects in development (mount → cleanup → mount again, synchronously in the same tick before either `fetch` call resolves), so without single-flight this component alone would fire two real, concurrent `/api/auth/refresh` requests on every dev-mode page load — the second would rotate the token out from under the first and could trip reuse detection. Routing this through `refreshAccessToken()` is what makes that safe; Step 1's failing test proves it directly.
+
+- [ ] **Step 1: Write the failing test — `client/src/context/AuthContext.test.tsx`**
+
+```tsx
+import { render, screen, waitFor } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AuthProvider, useAuth } from './AuthContext.js';
+
+function Probe() {
+  const { status, user } = useAuth();
+  return <div data-testid="status">{status}:{user?.email ?? 'none'}</div>;
+}
+
+describe('AuthProvider initialization', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('issues exactly one refresh call even under StrictMode double-invoked effects', async () => {
+    const fetchMock = fetch as ReturnType<typeof vi.fn>;
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({ accessToken: 'tok' }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ user: { id: '1', email: 'a@b.com', name: 'A', role: 'CUSTOMER' } }),
+          { status: 200 },
+        ),
+      );
+
+    render(
+      <StrictMode>
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('authenticated:a@b.com'));
+
+    const refreshCalls = fetchMock.mock.calls.filter(([path]) => path === '/api/auth/refresh');
+    expect(refreshCalls).toHaveLength(1);
+  });
+
+  it('settles to unauthenticated when there is no valid session', async () => {
+    const fetchMock = fetch as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { code: 'UNAUTHORIZED', message: 'no cookie' } }), { status: 401 }),
+    );
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('status').textContent).toBe('unauthenticated:none'));
+  });
+});
+```
+
+- [ ] **Step 2: Run to verify it fails**
+
+Run: `npm run test -w client`
+Expected: FAIL — `AuthContext.tsx` not found.
+
+- [ ] **Step 3: `client/src/context/AuthContext.tsx`**
 
 ```tsx
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { LoginInput, RegisterInput, UserDto } from '@audio-commerce/shared';
-import { apiFetch, setAccessToken } from '../lib/apiClient.js';
+import { apiFetch, setAccessToken, refreshAccessToken } from '../lib/apiClient.js';
 
 type Status = 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
 
@@ -2334,9 +2610,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     setStatus('loading');
-    apiFetch<{ accessToken: string }>('/api/auth/refresh', { method: 'POST' })
-      .then(async ({ accessToken }) => {
-        setAccessToken(accessToken);
+    // Goes through the single-flight gate (Task 12) so this effect running
+    // twice under StrictMode still issues exactly one network request.
+    refreshAccessToken()
+      .then(async () => {
         const { user } = await apiFetch<{ user: UserDto }>('/api/auth/me');
         if (!cancelled) {
           setUser(user);
@@ -2388,7 +2665,12 @@ export function useAuth(): AuthContextValue {
 }
 ```
 
-- [ ] **Step 2: `client/src/context/ToastContext.tsx`**
+- [ ] **Step 4: Run to verify the AuthContext tests pass**
+
+Run: `npm run test -w client`
+Expected: PASS — both `AuthContext.test.tsx` cases green.
+
+- [ ] **Step 5: `client/src/context/ToastContext.tsx`** (no dedicated test — exercised indirectly by the `Toast` component test in Task 14)
 
 ```tsx
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
@@ -2433,16 +2715,16 @@ export function useToast(): ToastContextValue {
 }
 ```
 
-- [ ] **Step 3: Typecheck**
+- [ ] **Step 6: Typecheck**
 
 Run: `npm run typecheck -w client`
 Expected: no errors.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add client/src/context
-git commit -m "feat(client): add AuthContext and ToastContext"
+git commit -m "feat(client): add AuthContext (single-flight, StrictMode-safe) and ToastContext"
 ```
 
 ---
@@ -2717,19 +2999,36 @@ git commit -m "feat(client): add Button, Input, Toast, Skeleton, EmptyState, Err
 ### Task 15: ErrorBoundary, ProtectedRoute, layouts, routing shell
 
 **Files:**
-- Create: `client/src/components/ErrorBoundary.tsx`, `client/src/components/ProtectedRoute.tsx`, `client/src/layouts/RootLayout.tsx`, `client/src/layouts/StorefrontLayout.tsx`, `client/src/layouts/AdminLayout.tsx`
+- Create: `client/src/lib/errorReporter.ts`, `client/src/components/ErrorBoundary.tsx`, `client/src/components/ProtectedRoute.tsx`, `client/src/layouts/RootLayout.tsx`, `client/src/layouts/StorefrontLayout.tsx`, `client/src/layouts/AdminLayout.tsx`
 - Modify: `client/src/App.tsx`
 - Test: `client/src/components/ProtectedRoute.test.tsx`
 
 **Interfaces:**
 - Consumes: `useAuth` (Task 13), `LoadingState` (Task 14).
-- Produces: `<ProtectedRoute role?: 'ADMIN'>` wrapping `<Outlet/>` — role check is UX-only (redirects), never the security boundary; consumed by `App.tsx` route tree.
+- Produces: `reportError(error: unknown, context?: Record<string, unknown>): void`; `<ProtectedRoute role?: 'ADMIN'>` wrapping `<Outlet/>` — role check is UX-only (redirects), never the security boundary; consumed by `App.tsx` route tree.
 
-- [ ] **Step 1: `client/src/components/ErrorBoundary.tsx`**
+- [ ] **Step 1: `client/src/lib/errorReporter.ts`**
+
+A single abstraction point for surfacing unexpected UI errors. In dev it logs to the console for debuggability; in production it stays silent here rather than spamming `console.error` on every render error — satisfying the zero-console-error production requirement (Phase 9) without inventing a fake reporting backend now. Wiring this to a real service (Sentry or similar) is a later-phase decision; this function is the seam where that plugs in.
+
+```ts
+export function reportError(error: unknown, context?: Record<string, unknown>): void {
+  if (import.meta.env.DEV) {
+    // eslint-disable-next-line no-console
+    console.error('Unhandled UI error', error, context);
+  }
+  // Production: intentionally silent here. A future phase may forward this
+  // to a real error-reporting service; until then, swallowing avoids noisy
+  // production console output while keeping one call site to change later.
+}
+```
+
+- [ ] **Step 2: `client/src/components/ErrorBoundary.tsx`**
 
 ```tsx
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { ErrorState } from './ErrorState.js';
+import { reportError } from '../lib/errorReporter.js';
 
 interface Props {
   children: ReactNode;
@@ -2746,7 +3045,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error('Unhandled UI error', error, info);
+    reportError(error, { componentStack: info.componentStack });
   }
 
   render() {
@@ -2764,7 +3063,7 @@ export class ErrorBoundary extends Component<Props, State> {
 }
 ```
 
-- [ ] **Step 2: Write the failing test — `client/src/components/ProtectedRoute.test.tsx`**
+- [ ] **Step 3: Write the failing test — `client/src/components/ProtectedRoute.test.tsx`**
 
 ```tsx
 import { render, screen } from '@testing-library/react';
@@ -2823,12 +3122,12 @@ describe('ProtectedRoute', () => {
 });
 ```
 
-- [ ] **Step 3: Run to verify it fails**
+- [ ] **Step 4: Run to verify it fails**
 
 Run: `npm run test -w client`
 Expected: FAIL — `ProtectedRoute.tsx` not found.
 
-- [ ] **Step 4: `client/src/components/ProtectedRoute.tsx`**
+- [ ] **Step 5: `client/src/components/ProtectedRoute.tsx`**
 
 ```tsx
 import { Navigate, Outlet } from 'react-router-dom';
@@ -2848,12 +3147,12 @@ export function ProtectedRoute({ role }: { role?: Role }) {
 }
 ```
 
-- [ ] **Step 5: Run to verify it passes**
+- [ ] **Step 6: Run to verify it passes**
 
 Run: `npm run test -w client`
 Expected: PASS.
 
-- [ ] **Step 6: `client/src/layouts/RootLayout.tsx`**
+- [ ] **Step 7: `client/src/layouts/RootLayout.tsx`**
 
 ```tsx
 import { Outlet } from 'react-router-dom';
@@ -2876,7 +3175,7 @@ export function RootLayout() {
 }
 ```
 
-- [ ] **Step 7: `client/src/layouts/StorefrontLayout.tsx`**
+- [ ] **Step 8: `client/src/layouts/StorefrontLayout.tsx`**
 
 ```tsx
 import { Link, Outlet } from 'react-router-dom';
@@ -2912,7 +3211,7 @@ export function StorefrontLayout() {
 }
 ```
 
-- [ ] **Step 8: `client/src/layouts/AdminLayout.tsx`**
+- [ ] **Step 9: `client/src/layouts/AdminLayout.tsx`**
 
 ```tsx
 import { Outlet } from 'react-router-dom';
@@ -2931,7 +3230,7 @@ export function AdminLayout() {
 }
 ```
 
-- [ ] **Step 9: Update `client/src/App.tsx`** with lazy route-level code splitting
+- [ ] **Step 10: Update `client/src/App.tsx`** with lazy route-level code splitting
 
 ```tsx
 import { lazy, Suspense } from 'react';
@@ -2972,11 +3271,11 @@ export default function App() {
 }
 ```
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
-git add client/src/components/ErrorBoundary.tsx client/src/components/ProtectedRoute.tsx client/src/components/ProtectedRoute.test.tsx client/src/layouts client/src/App.tsx
-git commit -m "feat(client): add ErrorBoundary, ProtectedRoute, layouts, and lazy routing shell"
+git add client/src/lib/errorReporter.ts client/src/components/ErrorBoundary.tsx client/src/components/ProtectedRoute.tsx client/src/components/ProtectedRoute.test.tsx client/src/layouts client/src/App.tsx
+git commit -m "feat(client): add ErrorBoundary (production-safe error reporting), ProtectedRoute, layouts, lazy routing shell"
 ```
 
 ---
@@ -3312,8 +3611,10 @@ Expected: 0 errors across `shared`, `server`, `client`.
 
 - [ ] **Step 4: Full test suite**
 
+Prerequisite: `audio_commerce_test` exists and has the migration applied (Task 3, Steps 5b/8) — `server`'s `test` script sets `NODE_ENV=test`, which points `env.ts` at `server/.env.test`, so this run never touches the development database.
+
 Run: `npm run test`
-Expected: all suites PASS — `shared` (import guard), `server` (unit + integration, including the concurrent-stock and refresh-reuse tests), `client` (component + page tests).
+Expected: all suites PASS — `shared` (import guard), `server` (unit + integration against the isolated test database, including the concurrent-stock, DB check-constraint, and refresh-reuse tests), `client` (component + context + page tests, including the StrictMode single-flight-refresh test).
 
 - [ ] **Step 5: Production builds**
 
@@ -3325,7 +3626,7 @@ Expected: `shared/dist`, `server/dist`, `client/dist` all produced with no error
 Run `npm run dev` (starts both server and client). In a browser:
 1. Visit `http://localhost:5173/register`, create an account — expect redirect to `/account` showing the name/email.
 2. Visit `http://localhost:5173/admin` while logged in as that CUSTOMER — expect redirect to `/login` (client-side UX gate).
-3. Log out, log in as `admin@audiocommerce.demo` / `DemoPass123!` (seeded in Task 3) — expect access to `/admin` showing the placeholder.
+3. Log out, log in as `admin@audiocommerce.demo` using the password from `SEED_ADMIN_PASSWORD` (or `ChangeMe!Dev123` if that env var was left unset — Task 3, Step 11) — expect access to `/admin` showing the placeholder.
 4. With devtools open, confirm no access token appears in `localStorage`.
 5. Directly `curl -i http://localhost:4000/api/admin/overview` with no auth header — expect `401`.
 
@@ -3351,6 +3652,22 @@ Confirm nothing sensitive (`.env`, `node_modules`) is staged before any further 
 
 **Spec coverage:** every Data Model entity, the inventory transaction design, refresh rotation/reuse detection, order/address snapshot rules (schema only — populated in Phase 4+), the `/shared` environment-agnostic guard, RBAC, design tokens, and the app shell/placeholder pages from the spec each map to a task above (Tasks 3, 6, 7, 2, 9, 11, 15-16 respectively). Testing infrastructure (Vitest/Testing Library/Supertest) is established throughout rather than deferred.
 
-**Type consistency:** `UserDto`/`RegisterInput`/`LoginInput` (Task 2) are the exact types threaded through `auth.service.ts` (Task 7), `AuthContext` (Task 13), and both auth pages (Task 16). `decrementStock(variantId, qty, tx)` (Task 6) matches its only call site inside `prisma.$transaction` callbacks in its own tests; Phase 4 checkout work will call it the same way. `ApiError` (Task 12) is the error type `LoginPage`/`RegisterPage` catch via `err instanceof Error` (safe, since `ApiError extends Error`).
+**Type consistency:** `UserDto`/`RegisterInput`/`LoginInput` (Task 2) are the exact types threaded through `auth.service.ts` (Task 7), `AuthContext` (Task 13), and both auth pages (Task 16). `decrementStock(variantId, qty, tx)` (Task 6) matches its only call site inside `prisma.$transaction` callbacks in its own tests; Phase 4 checkout work will call it the same way. `ApiError` (Task 12) is the error type `LoginPage`/`RegisterPage` catch via `err instanceof Error` (safe, since `ApiError extends Error`). `refreshAccessToken()` (Task 12) is exported once and consumed identically by `apiFetch`'s automatic-retry path and `AuthContext`'s mount effect (Task 13) — a single implementation, not two independent refresh code paths that could drift.
 
 **Scope:** confirmed no product/cart/order/admin-CRUD UI or business logic appears in any task — only the schema, the reusable inventory primitive (needed as infra, exercised without checkout UI), and placeholder pages proving the auth/RBAC plumbing.
+
+**Re-review against the 11 blocking findings (this revision):**
+
+1. *Single-flight refresh / StrictMode.* Fixed in Task 12 (`refreshAccessToken()` module-level in-flight promise) and Task 13 (`AuthContext` calls `refreshAccessToken()`, not raw `apiFetch`). Covered by `apiClient.test.ts`'s concurrent-401 and direct-concurrent-call tests, and `AuthContext.test.tsx`'s StrictMode render test.
+2. *Transactional rotation.* Fixed in Task 7 — revoke-old and create-new now run inside one `prisma.$transaction`, with the `revokedAt: null` conditional guard preserved inside it, so the race-detection semantics are unchanged.
+3. *Test DB isolation.* Fixed in Task 3 (Step 5b: `.env.test.example`, `audio_commerce_test`) and Task 4 (`env.ts` loads `.env.test` under `NODE_ENV=test`); `resetDb()` (Task 6) now throws if `NODE_ENV !== 'test'` and covers the full FK-dependency-ordered table graph.
+4. *apiFetch refresh eligibility.* Fixed in Task 12 — `NEVER_AUTO_REFRESH` now covers login/register/refresh/logout, not just refresh; covered by a parameterized test over all four paths.
+5. *Stale-JWT-role decision.* Documented explicitly in Global Constraints, as a code comment on `requireRole` (Task 8), and as a comment on `refresh()`'s access-token re-signing (Task 7) — the tradeoff (up to one 15-minute access-token lifetime) is stated, not implicit.
+6. *`getUserById` leaking a 500.* Fixed in Task 7 — both `getUserById` and `refresh()`'s user lookup now convert a missing user into `UnauthorizedError` (401).
+7. *Ambiguous migration constraint check.* Replaced in Task 3 (Step 9's manual `db execute --stdin` removed) with a deterministic automated test in Task 6 that performs a direct Prisma write violating `stockQty >= 0` and asserts Postgres rejects it.
+8. *`import.meta.dirname` portability.* Fixed in Task 2's guard test — now uses `fileURLToPath(import.meta.url)` + `dirname()`, and `@types/node` was added to `shared`'s devDependencies so the types resolve.
+9. *CSS import ordering.* Fixed in Task 11 — `@import './tokens.css'` now precedes the `@tailwind` directives in `index.css`, with a comment explaining why the old order was actually invalid CSS (not just a style nit).
+10. *ErrorBoundary / console noise.* Fixed via a new `client/src/lib/errorReporter.ts` (Task 15) — logs only in `import.meta.env.DEV`, silent in production, single seam for a future real reporting integration.
+11. *Hardcoded demo passwords.* Fixed in Task 3's seed script — reads `SEED_ADMIN_PASSWORD`/`SEED_CUSTOMER_PASSWORD`, warns when falling back to the labeled dev-only default, and refuses to run under `NODE_ENV=production`; the demo accounts and the fallback behavior are documented in the same step.
+
+**Placeholder scan:** no `TBD`/`TODO` introduced by these edits; every new/changed step carries real, runnable code or commands.
