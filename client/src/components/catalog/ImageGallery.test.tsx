@@ -17,6 +17,13 @@ const images = [
 ];
 
 describe('ImageGallery', () => {
+  it('sets fetchpriority="high" on the primary image and leaves loading unset', () => {
+    render(<ImageGallery images={images} />);
+    const primary = screen.getByRole('img', { name: images[0].altText });
+    expect(primary).toHaveAttribute('fetchpriority', 'high');
+    expect(primary).not.toHaveAttribute('loading');
+  });
+
   it('changes the primary image when a thumbnail button is pressed', async () => {
     render(<ImageGallery images={images} />);
     expect(screen.getByRole('img', { name: images[0].altText })).toBeInTheDocument();

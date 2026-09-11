@@ -17,9 +17,9 @@ export function ImageGallery({ images }: { images: ImageDto[] }) {
           alt={current.altText}
           width={800}
           height={800}
-          fetchPriority="high"
           decoding="async"
           className="aspect-square w-full rounded-md object-cover"
+          {...({ fetchpriority: 'high' } as { fetchpriority: 'high' })}
           onError={() => setFailed((prev) => ({ ...prev, [active]: true }))}
         />
       )}
