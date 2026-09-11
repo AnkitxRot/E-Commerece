@@ -23,6 +23,16 @@ describe('auth flows', () => {
     expect(res.headers['set-cookie']).toBeDefined();
   });
 
+  it('sets the refresh cookie with the correct security attributes', async () => {
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'cookie@example.com', password: 'password123', name: 'C' });
+    const cookie = res.headers['set-cookie']?.[0] as string;
+    expect(cookie).toMatch(/HttpOnly/i);
+    expect(cookie).toMatch(/SameSite=Strict/i);
+    expect(cookie).toMatch(/Path=\/api\/auth/i);
+  });
+
   it('rejects duplicate registration email with 409', async () => {
     await request(app).post('/api/auth/register').send({ email: 'dup@example.com', password: 'password123', name: 'A' });
     const res = await request(app).post('/api/auth/register').send({ email: 'dup@example.com', password: 'password123', name: 'B' });
@@ -80,5 +90,20 @@ describe('auth flows', () => {
   it('rejects /me with no token', async () => {
     const res = await request(app).get('/api/auth/me');
     expect(res.status).toBe(401);
+  });
+
+  it('logout revokes the refresh token server-side', async () => {
+    const registerRes = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'logout@example.com', password: 'password123', name: 'L' });
+    const cookie = extractRefreshCookie(registerRes);
+
+    const logoutRes = await request(app).post('/api/auth/logout').set('Cookie', cookie);
+    expect(logoutRes.status).toBe(204);
+
+    // The cookie was revoked server-side, not just cleared client-side:
+    // reusing it must now fail even though the client still has the old value.
+    const reuseAttempt = await request(app).post('/api/auth/refresh').set('Cookie', cookie);
+    expect(reuseAttempt.status).toBe(401);
   });
 });
