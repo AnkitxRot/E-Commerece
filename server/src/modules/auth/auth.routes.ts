@@ -4,6 +4,7 @@ import { registerSchema, loginSchema } from '@audio-commerce/shared';
 import { validate } from '../../middleware/validate.js';
 import { requireAuth } from '../../middleware/auth.js';
 import * as controller from './auth.controller.js';
+import { env } from '../../config/env.js';
 
 const asyncHandler =
   (fn: (req: Request, res: Response) => Promise<void>) =>
@@ -11,7 +12,13 @@ const asyncHandler =
     fn(req, res).catch(next);
   };
 
-const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => env.NODE_ENV === 'test',
+});
 
 export const authRouter = Router();
 

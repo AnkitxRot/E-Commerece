@@ -106,4 +106,14 @@ describe('auth flows', () => {
     const reuseAttempt = await request(app).post('/api/auth/refresh').set('Cookie', cookie);
     expect(reuseAttempt.status).toBe(401);
   });
+
+  it('does not 429 additional register calls after this file has already used the auth limiter', async () => {
+    for (let i = 0; i < 8; i += 1) {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ email: `burst-${i}@example.com`, password: 'password123', name: 'Burst' });
+      expect(res.status).not.toBe(429);
+      expect(res.status).toBe(201);
+    }
+  });
 });
