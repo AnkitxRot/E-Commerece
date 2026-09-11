@@ -6,6 +6,7 @@ import { env } from './config/env.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { adminRouter } from './modules/admin/admin.routes.js';
+import { catalogRouter } from './modules/catalog/catalog.routes.js';
 
 export const app = express();
 
@@ -17,5 +18,6 @@ app.use(cookieParser());
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/catalog', catalogRouter);
 
 app.use(errorHandler);

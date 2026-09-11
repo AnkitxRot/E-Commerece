@@ -7,6 +7,7 @@ function mockRes() {
   const res = {} as Response;
   res.status = vi.fn().mockReturnValue(res);
   res.json = vi.fn().mockReturnValue(res);
+  res.setHeader = vi.fn().mockReturnValue(res);
   return res;
 }
 
@@ -16,6 +17,7 @@ describe('errorHandler', () => {
     errorHandler(new NotFoundError('missing'), {} as Request, res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(404);
     expect(res.json).toHaveBeenCalledWith({ error: { code: 'NOT_FOUND', message: 'missing' } });
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
   });
 
   it('maps ValidationError to 400', () => {
@@ -23,6 +25,7 @@ describe('errorHandler', () => {
     errorHandler(new ValidationError('bad body'), {} as Request, res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(400);
     expect(res.json).toHaveBeenCalledWith({ error: { code: 'VALIDATION_ERROR', message: 'bad body' } });
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
   });
 
   it('maps an unknown error to a generic 500 with no stack leakage', () => {
@@ -30,5 +33,6 @@ describe('errorHandler', () => {
     errorHandler(new Error('db exploded'), {} as Request, res, vi.fn());
     expect(res.status).toHaveBeenCalledWith(500);
     expect(res.json).toHaveBeenCalledWith({ error: { code: 'INTERNAL_ERROR', message: 'Something went wrong' } });
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'no-store');
   });
 });
