@@ -149,13 +149,14 @@
   "devDependencies": {
     "concurrently": "^9.0.0",
     "eslint": "^9.9.0",
-    "@typescript-eslint/eslint-plugin": "^8.5.0",
-    "@typescript-eslint/parser": "^8.5.0",
+    "typescript-eslint": "^8.5.0",
     "prettier": "^3.3.3",
     "typescript": "^5.6.2"
   }
 }
 ```
+
+`typescript-eslint` is the meta-package whose `tseslint.config()` helper `eslint.config.js` (Step 5) calls directly — it re-exports `@typescript-eslint/eslint-plugin` and `@typescript-eslint/parser` internally, so depending on the meta-package alone is sufficient and is what the flat-config helper actually resolves at runtime.
 
 - [ ] **Step 2: Create `.gitignore`**
 
