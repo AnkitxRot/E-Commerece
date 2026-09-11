@@ -31,3 +31,8 @@ export async function getProductBySlugHandler(req: Request, res: Response) {
   const product = await catalogService.getProductBySlug(req.params.slug);
   res.status(200).json({ product });
 }
+
+export async function getHomeHandler(_req: Request, res: Response) {
+  const home = await catalogService.getHome();
+  res.status(200).json(home);
+}

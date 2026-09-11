@@ -13,6 +13,7 @@ const asyncHandler =
 export const catalogRouter = Router();
 
 catalogRouter.use(publicCatalogCache);
+catalogRouter.get('/home', asyncHandler(controller.getHomeHandler));
 catalogRouter.get('/settings', asyncHandler(controller.getSettingsHandler));
 catalogRouter.get('/categories', asyncHandler(controller.getCategoryTreeHandler));
 catalogRouter.get('/categories/:slug', validate(catalogSlugParamSchema, 'params'), asyncHandler(controller.getCategoryBySlugHandler));

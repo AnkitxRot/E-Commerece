@@ -1,14 +1,19 @@
-import { Prisma } from '@prisma/client';
-import type {
-  BrandsResponse,
-  CatalogSort,
-  CategoriesResponse,
-  CategoryDetailDto,
-  CategoryTreeNode,
-  ProductDetailDto,
-  ProductListQuery,
-  ProductListResponse,
-  StoreSettingsDto,
+import { Prisma, type ContentBlock } from '@prisma/client';
+import {
+  ContentBlockType,
+  contentBlockPayloadSchemaByType,
+  heroContentSchema,
+  type BrandsResponse,
+  type CatalogSort,
+  type CategoriesResponse,
+  type CategoryDetailDto,
+  type CategoryTreeNode,
+  type HomeBlockDto,
+  type HomeResponse,
+  type ProductDetailDto,
+  type ProductListQuery,
+  type ProductListResponse,
+  type StoreSettingsDto,
 } from '@audio-commerce/shared';
 import { NotFoundError } from '../../errors/AppError.js';
 import { prisma } from '../../lib/prisma.js';
@@ -84,6 +89,80 @@ const productListInclude = {
   variants: true,
   images: { orderBy: [{ position: 'asc' as const }, { id: 'asc' as const }] },
 };
+
+async function mapHomeBlock(block: ContentBlock): Promise<HomeBlockDto | null> {
+  if (block.type === ContentBlockType.BANNER) {
+    const parsed = contentBlockPayloadSchemaByType[ContentBlockType.BANNER].safeParse(block.payload);
+    if (!parsed.success) {
+      console.warn(`Omitting content block ${block.id}: invalid BANNER payload`);
+      return null;
+    }
+    return { id: block.id, type: ContentBlockType.BANNER, position: block.position, payload: parsed.data };
+  }
+
+  if (block.type === ContentBlockType.ANNOUNCEMENT) {
+    const parsed = contentBlockPayloadSchemaByType[ContentBlockType.ANNOUNCEMENT].safeParse(block.payload);
+    if (!parsed.success) {
+      console.warn(`Omitting content block ${block.id}: invalid ANNOUNCEMENT payload`);
+      return null;
+    }
+    return { id: block.id, type: ContentBlockType.ANNOUNCEMENT, position: block.position, payload: parsed.data };
+  }
+
+  const parsed = contentBlockPayloadSchemaByType[ContentBlockType.FEATURED_COLLECTION].safeParse(block.payload);
+  if (!parsed.success) {
+    console.warn(`Omitting content block ${block.id}: invalid FEATURED_COLLECTION payload`);
+    return null;
+  }
+
+  const products = await prisma.product.findMany({
+    where: { slug: { in: parsed.data.productSlugs }, status: 'ACTIVE' },
+    include: productListInclude,
+  });
+  const bySlug = new Map(products.map((product) => [product.slug, product]));
+  const ordered = parsed.data.productSlugs.flatMap((slug) => {
+    const product = bySlug.get(slug);
+    return product ? [toCard(product)] : [];
+  });
+  if (ordered.length === 0) return null;
+
+  return {
+    id: block.id,
+    type: ContentBlockType.FEATURED_COLLECTION,
+    position: block.position,
+    payload: { title: parsed.data.title },
+    products: ordered,
+  };
+}
+
+export async function getHome(): Promise<HomeResponse> {
+  const [settings, blocks, featured] = await Promise.all([
+    prisma.storeSettings.findUnique({ where: { id: 'singleton' } }),
+    prisma.contentBlock.findMany({
+      where: { active: true },
+      orderBy: [{ position: 'asc' }, { id: 'asc' }],
+    }),
+    prisma.product.findMany({
+      where: { status: 'ACTIVE', featured: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: 8,
+      include: productListInclude,
+    }),
+  ]);
+
+  const heroParsed = heroContentSchema.safeParse(settings?.heroContent);
+  const mapped: HomeBlockDto[] = [];
+  for (const block of blocks) {
+    const dto = await mapHomeBlock(block);
+    if (dto) mapped.push(dto);
+  }
+
+  return {
+    hero: heroParsed.success ? heroParsed.data : null,
+    blocks: mapped,
+    featured: featured.map(toCard),
+  };
+}
 
 const sortPrimary: Record<CatalogSort, Prisma.Sql> = {
   newest: Prisma.sql`matched."createdAt" DESC`,
