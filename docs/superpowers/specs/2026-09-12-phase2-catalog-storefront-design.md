@@ -1,7 +1,7 @@
 # Phase 2: Public Catalog Storefront — Design Spec
 
 Date: 2026-09-12
-Status: Ready for review (not approved for implementation planning until this file is accepted)
+Status: Approved for implementation planning (amendments 1–11 incorporated)
 
 ## Purpose
 
@@ -17,8 +17,11 @@ This phase makes the storefront browsable. It does not sell.
   CSS. No Next.js. No SSR/SSG.
 - Backend: Node.js + Express + TypeScript.
 - Database: existing PostgreSQL + Prisma schema. No table redesign.
-- Contracts: Zod schemas in `/shared`, imported by server (authoritative)
-  and client (UX validation / typing only).
+- Contracts: Zod schemas in `/shared` are the **only** catalog
+  request/response types. Server validates with them. Client types
+  them with `z.infer` and **runtime-parses** every catalog payload
+  with the same schemas. The client must not declare parallel
+  interfaces or guess response shape.
 - Auth: unchanged. Catalog APIs are public and do not require a JWT.
 - Money: INR. JSON never uses floating-point for prices.
 
@@ -59,25 +62,39 @@ Public catalog queries **always** constrain `Product.status = ACTIVE`.
 `DRAFT` and `ARCHIVED` products are indistinguishable from missing:
 detail and search return 404 / omit them. Do not leak existence.
 
-Variant availability is computed, never stored as a new column:
+Availability is computed, never stored as a new column, and is the
+**same formula everywhere** (list cards, list `inStock` filter, PDP
+product, PDP variant):
 
 ```
-availableQty = stockQty - reservedQty
-inStock      = availableQty > 0
+availableQty(variant) = variant.stockQty - variant.reservedQty
+inStock(variant)      = availableQty(variant) > 0
+inStock(product)      = at least one variant has inStock(variant) === true
+                        (zero-variant products are not in stock)
 ```
+
+The list filter `inStock=true` means `inStock(product) === true`.
+`inStock=false` means `inStock(product) === false` (every variant
+has `availableQty === 0`, or there are no variants).
 
 Do not expose `stockQty`, `reservedQty`, or `lowStockThreshold` on
-public DTOs.
+public DTOs. PDP variants **do** expose `availableQty` (the computed
+value) plus `inStock`. List cards expose only `inStock` (the product
+rollup), not per-variant qty.
 
 **Accepted schema limitations (not blockers):**
 
 - `ProductImage` is product-scoped. Changing variant does not swap the
   gallery. Color is communicated with the variant attribute label.
 - `ContentBlock.payload` and `StoreSettings.heroContent` are untyped
-  JSON. This spec locks their shapes; invalid payloads are skipped,
-  not migrated.
-- No `pg_trgm` / tsvector. Search is case-insensitive substring match
-  at seed scale (tens of products, not millions).
+  JSON **in the database**. They never flow into the homepage UI as
+  raw JSON. The server parses each payload with the Zod schema for
+  that `ContentBlockType` (or `heroContentSchema`) and returns only
+  the parsed DTO. Invalid payloads are omitted (logged), not
+  migrated.
+- Search stays Postgres case-insensitive **substring** (`ILIKE`,
+  metacharacters escaped). No search engine, no `pg_trgm`, no
+  tsvector, no speculative indexes in this phase.
 
 A Prisma migration is allowed only if implementation discovers a
 concrete blocker (for example a missing index that makes a required
@@ -90,23 +107,31 @@ new tables, renamed columns, and variant-image FKs are not.
 
 **Pagination — offset `page` + `pageSize` with a total count**
 (not cursor, not infinite scroll). Listing URLs must be shareable as
-`?page=2`. Cursor pagination fights numbered pagination and filter
-chips. Catalog size is small; `OFFSET` is acceptable.
+`?page=2`. Every catalog `ORDER BY` ends with `"id" ASC` as a stable
+tie-breaker so equal primary keys never shuffle between pages.
 
-**Search — Postgres `ILIKE` via Prisma `contains` + `mode:
-'insensitive'`** on product name, description, and variant SKU (not
-Elasticsearch, not `pg_trgm` in this phase). A search index would be a
-schema/ops expansion without a demonstrated scale need.
+**Search — escaped Postgres `ILIKE` substring** on product name,
+description, and variant SKU. No Elasticsearch, no `pg_trgm`, no
+generated search column. Academic catalog scale does not justify
+them.
+
+**Category descendants — one bounded recursive CTE** (max depth 8),
+not per-child queries and not an in-memory walk of N queries. The
+full nav tree is a **single** `findMany` assembled in process (also
+not N+1).
 
 **Client data fetching — route-driven `apiFetch` + `AbortController`**
-(not TanStack Query, not a global catalog store). Phase 1 has no
-client cache library. The URL is the source of truth for list state.
-Adding a cache library would be a new runtime architecture.
+(not TanStack Query). URL is the source of truth. Changing
+q/category/brand/price/inStock/sort (or pageSize) **resets `page`
+to 1**. Filters `replace` history; pagination `push`es.
 
-**Server cache — short public `Cache-Control` on catalog GETs**
-(not Redis). Listings can go slightly stale on stock; Phase 2 does
-not sell, so a 15-second public cache is enough. Authenticated
-`/api/auth/*` behavior is unchanged.
+**Server cache — short-lived, never user-specific public cache.**
+Anonymous catalog GET: `public, max-age=15, stale-while-revalidate=60`.
+If the request carries `Authorization` or a `refreshToken` cookie:
+`private, max-age=15` (same body, never stored as a public shared
+response). Errors: `no-store`. This helper is catalog-router only —
+never `/api/auth` or `/api/admin`. Catalog DTOs contain no user,
+cart, or session fields.
 
 ---
 
@@ -115,8 +140,9 @@ not sell, so a 15-second public cache is enough. Authenticated
 Route → controller → service → Prisma. Same as auth.
 
 New server module: `server/src/modules/catalog/`
-(`catalog.routes.ts`, `catalog.controller.ts`, `catalog.service.ts`).
-No writes except the existing seed script.
+(`catalog.routes.ts`, `catalog.controller.ts`, `catalog.service.ts`,
+`categoryTree.ts`, `money.ts`, `availability.ts`, `cacheControl.ts`,
+`mapProduct.ts`). No writes except the existing seed script.
 
 New shared module: `shared/src/schemas/catalog.ts`, re-exported from
 `shared/src/index.ts`.
@@ -178,267 +204,469 @@ on failure via the existing `errorHandler`. Success bodies are
 explicit objects (no `{ data: ... }` envelope — matches auth).
 
 Query and params are validated with `validate(schema, 'query' |
-'params')`. Express query values are strings; schemas **coerce**
-numbers and booleans. A repeated query key that arrives as `string[]`
-fails validation (400 `VALIDATION_ERROR`).
+'params')` using the shared Zod schemas in
+`shared/src/schemas/catalog.ts`. Express query values are strings (or
+`string[]` if a key is repeated). Repeated keys that arrive as arrays
+fail validation (400 `VALIDATION_ERROR`). Booleans accept only the
+exact strings `true` and `false` (not `1`, `yes`, `TRUE`). Numbers are
+**not** parsed with IEEE coerce-from-garbage: they must match a
+bounded numeric pattern (see query schema).
 
-### `GET /api/catalog/settings`
+Every successful catalog JSON body is described by a named Zod object
+exported from `/shared`. The client must `safeParse` that schema
+before rendering.
 
-Public store chrome.
+---
 
-```
-{
-  storeName: string,
-  logoUrl: string | null,
-  contactEmail: string
+## Shared Zod / TypeScript contracts
+
+File: `shared/src/schemas/catalog.ts`. Re-export from `shared/src/index.ts`.
+`ContentBlockType` already exists in `shared/src/enums.ts`.
+
+```ts
+import { z } from 'zod';
+import { ContentBlockType } from '../enums.js';
+
+export const moneySchema = z.string().regex(/^\d+\.\d{2}$/);
+export type Money = z.infer<typeof moneySchema>;
+
+export const slugSchema = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+  .min(1)
+  .max(80);
+
+export const skuSchema = z.string().trim().min(1).max(40);
+
+export const internalPathSchema = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((p) => p.startsWith('/') && !p.startsWith('//') && !/^https?:/i.test(p), {
+    message: 'Must be a root-relative path',
+  });
+
+export const httpsUrlSchema = z.string().url().refine((u) => u.startsWith('https://'), {
+  message: 'Must be an https URL',
+});
+
+export const variantAttributesSchema = z.record(z.string().min(1).max(40), z.string().min(1).max(80));
+
+export const imageDtoSchema = z.object({
+  url: httpsUrlSchema,
+  altText: z.string().min(1).max(200),
+  position: z.number().int().min(0),
+});
+export type ImageDto = z.infer<typeof imageDtoSchema>;
+
+export const brandSummarySchema = z.object({
+  slug: slugSchema,
+  name: z.string().min(1).max(100),
+});
+export type BrandSummary = z.infer<typeof brandSummarySchema>;
+
+export const brandDtoSchema = brandSummarySchema.extend({
+  logoUrl: httpsUrlSchema.nullable(),
+});
+export type BrandDto = z.infer<typeof brandDtoSchema>;
+
+export const categorySummarySchema = z.object({
+  slug: slugSchema,
+  name: z.string().min(1).max(100),
+});
+export type CategorySummary = z.infer<typeof categorySummarySchema>;
+
+export const productCardDtoSchema = z
+  .object({
+    slug: slugSchema,
+    name: z.string().min(1).max(120),
+    brand: brandSummarySchema.nullable(),
+    category: categorySummarySchema,
+    priceFrom: moneySchema,
+    priceTo: moneySchema,
+    thumbnail: imageDtoSchema.nullable(),
+    inStock: z.boolean(),
+    featured: z.boolean(),
+  })
+  .strict();
+export type ProductCardDto = z.infer<typeof productCardDtoSchema>;
+
+export const variantDtoSchema = z
+  .object({
+    sku: skuSchema,
+    attributes: variantAttributesSchema,
+    price: moneySchema,
+    inStock: z.boolean(),
+    availableQty: z.number().int().min(0),
+  })
+  .strict();
+export type VariantDto = z.infer<typeof variantDtoSchema>;
+
+export const productDetailDtoSchema = z
+  .object({
+    slug: slugSchema,
+    name: z.string().min(1).max(120),
+    description: z.string().min(1).max(8000),
+    seoTitle: z.string().max(80).nullable(),
+    seoDescription: z.string().max(200).nullable(),
+    brand: brandDtoSchema.nullable(),
+    category: categorySummarySchema,
+    featured: z.boolean(),
+    inStock: z.boolean(),
+    images: z.array(imageDtoSchema),
+    variants: z.array(variantDtoSchema),
+    priceFrom: moneySchema,
+    priceTo: moneySchema,
+  })
+  .strict();
+export type ProductDetailDto = z.infer<typeof productDetailDtoSchema>;
+
+export const heroContentSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+  subtitle: z.string().trim().min(1).max(200).optional(),
+  imageUrl: httpsUrlSchema.optional(),
+  ctaLabel: z.string().trim().min(1).max(40).optional(),
+  ctaHref: internalPathSchema.optional(),
+});
+export type HeroContent = z.infer<typeof heroContentSchema>;
+
+export const bannerPayloadSchema = heroContentSchema;
+export type BannerPayload = z.infer<typeof bannerPayloadSchema>;
+
+export const announcementPayloadSchema = z.object({
+  message: z.string().trim().min(1).max(240),
+  href: internalPathSchema.optional(),
+});
+export type AnnouncementPayload = z.infer<typeof announcementPayloadSchema>;
+
+export const featuredCollectionPayloadSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+  productSlugs: z.array(slugSchema).min(1).max(8),
+});
+export type FeaturedCollectionPayload = z.infer<typeof featuredCollectionPayloadSchema>;
+
+export const contentBlockPayloadSchemaByType = {
+  [ContentBlockType.BANNER]: bannerPayloadSchema,
+  [ContentBlockType.ANNOUNCEMENT]: announcementPayloadSchema,
+  [ContentBlockType.FEATURED_COLLECTION]: featuredCollectionPayloadSchema,
+} as const;
+
+export const bannerBlockDtoSchema = z.object({
+  id: z.string().uuid(),
+  type: z.literal(ContentBlockType.BANNER),
+  position: z.number().int(),
+  payload: bannerPayloadSchema,
+});
+export const announcementBlockDtoSchema = z.object({
+  id: z.string().uuid(),
+  type: z.literal(ContentBlockType.ANNOUNCEMENT),
+  position: z.number().int(),
+  payload: announcementPayloadSchema,
+});
+export const featuredCollectionBlockDtoSchema = z.object({
+  id: z.string().uuid(),
+  type: z.literal(ContentBlockType.FEATURED_COLLECTION),
+  position: z.number().int(),
+  payload: z.object({ title: z.string().min(1).max(80) }),
+  products: z.array(productCardDtoSchema),
+});
+export const homeBlockDtoSchema = z.discriminatedUnion('type', [
+  bannerBlockDtoSchema,
+  announcementBlockDtoSchema,
+  featuredCollectionBlockDtoSchema,
+]);
+export type HomeBlockDto = z.infer<typeof homeBlockDtoSchema>;
+
+export const storeSettingsDtoSchema = z.object({
+  storeName: z.string().min(1).max(80),
+  logoUrl: httpsUrlSchema.nullable(),
+  contactEmail: z.string().email(),
+});
+export type StoreSettingsDto = z.infer<typeof storeSettingsDtoSchema>;
+
+export const homeResponseSchema = z
+  .object({
+    hero: heroContentSchema.nullable(),
+    blocks: z.array(homeBlockDtoSchema),
+    featured: z.array(productCardDtoSchema).max(8),
+  })
+  .strict();
+export type HomeResponse = z.infer<typeof homeResponseSchema>;
+
+export type CategoryTreeNode = {
+  slug: string;
+  name: string;
+  children: CategoryTreeNode[];
+};
+export const categoryTreeNodeSchema: z.ZodType<CategoryTreeNode> = z.lazy(() =>
+  z.object({
+    slug: slugSchema,
+    name: z.string().min(1).max(100),
+    children: z.array(categoryTreeNodeSchema),
+  }),
+);
+
+export const categoriesResponseSchema = z.object({
+  categories: z.array(categoryTreeNodeSchema),
+});
+export type CategoriesResponse = z.infer<typeof categoriesResponseSchema>;
+
+export const categoryDetailDtoSchema = z.object({
+  slug: slugSchema,
+  name: z.string().min(1).max(100),
+  parent: categorySummarySchema.nullable(),
+  children: z.array(categorySummarySchema),
+});
+export type CategoryDetailDto = z.infer<typeof categoryDetailDtoSchema>;
+
+export const brandsResponseSchema = z.object({
+  brands: z.array(brandDtoSchema),
+});
+export type BrandsResponse = z.infer<typeof brandsResponseSchema>;
+
+export const productListMetaSchema = z.object({
+  page: z.number().int().min(1),
+  pageSize: z.number().int().min(1).max(48),
+  total: z.number().int().min(0),
+  totalPages: z.number().int().min(0),
+});
+export type ProductListMeta = z.infer<typeof productListMetaSchema>;
+
+export const productListResponseSchema = z
+  .object({
+    items: z.array(productCardDtoSchema),
+    meta: productListMetaSchema,
+  })
+  .strict();
+export type ProductListResponse = z.infer<typeof productListResponseSchema>;
+
+export const productDetailResponseSchema = z.object({
+  product: productDetailDtoSchema,
+});
+export type ProductDetailResponse = z.infer<typeof productDetailResponseSchema>;
+
+export const catalogSortSchema = z.enum(['newest', 'price_asc', 'price_desc', 'name_asc', 'name_desc']);
+export type CatalogSort = z.infer<typeof catalogSortSchema>;
+
+const scalarString = z.string(); // rejects string[]
+
+export function normalizeSearchQuery(raw: string): string {
+  return raw.trim().replace(/\s+/g, ' ');
 }
+
+const qSchema = z.preprocess((v) => {
+  if (v === undefined || v === '') return undefined;
+  if (typeof v !== 'string') return v;
+  const n = normalizeSearchQuery(v);
+  return n === '' ? undefined : n;
+}, z.string().min(2).max(80).optional());
+
+const optionalSlug = z.preprocess(
+  (v) => (v === undefined || v === '' ? undefined : v),
+  slugSchema.optional(),
+);
+
+const boundedIntString = (min: number, max: number) =>
+  scalarString.regex(/^\d+$/).transform(Number).refine((n) => Number.isInteger(n) && n >= min && n <= max);
+
+const priceString = scalarString
+  .regex(/^\d+(?:\.\d{1,2})?$/)
+  .transform(Number)
+  .refine((n) => n >= 0 && n <= 1_000_000);
+
+const optionalBoolean = z.preprocess(
+  (v) => (v === undefined || v === '' ? undefined : v),
+  z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+);
+
+export const productListQuerySchema = z
+  .object({
+    q: qSchema,
+    category: optionalSlug,
+    brand: optionalSlug,
+    minPrice: z.preprocess((v) => (v === undefined || v === '' ? undefined : v), priceString.optional()),
+    maxPrice: z.preprocess((v) => (v === undefined || v === '' ? undefined : v), priceString.optional()),
+    inStock: optionalBoolean,
+    sort: z.preprocess((v) => (v === undefined || v === '' ? 'newest' : v), catalogSortSchema),
+    page: z.preprocess((v) => (v === undefined || v === '' ? '1' : v), boundedIntString(1, 1_000_000)),
+    pageSize: z.preprocess((v) => (v === undefined || v === '' ? '24' : v), boundedIntString(1, 48)),
+  })
+  .strict()
+  .superRefine((val, ctx) => {
+    if (val.minPrice !== undefined && val.maxPrice !== undefined && val.minPrice > val.maxPrice) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'minPrice must be <= maxPrice', path: ['maxPrice'] });
+    }
+  });
+export type ProductListQuery = z.infer<typeof productListQuerySchema>;
+
+export const catalogSlugParamSchema = z.object({ slug: slugSchema }).strict();
 ```
 
-404 if the singleton row is missing (seed always creates it).
+Unknown query keys fail (`.strict()`). `TRUE`, `yes`, `1` for
+`inStock` fail. `page=1.5`, `page=-1`, `pageSize=49`, `sort=popular`,
+`q=a` (length 1), `q` of 81 chars, `minPrice=abc`, and
+`minPrice=10&maxPrice=5` all fail with 400.
 
-### `GET /api/catalog/home`
+---
 
-```
-{
-  hero: HeroDto | null,
-  blocks: HomeBlockDto[],
-  featured: ProductCardDto[]
-}
-```
+## Category + descendant resolution
 
-- `hero` is `StoreSettings.heroContent` parsed against `heroContentSchema`.
-  If parse fails or the object is empty, `hero` is `null`.
-- `blocks` are `ContentBlock` rows with `active = true`, ordered by
-  `position` ascending, `id` ascending. Each row is parsed against the
-  payload schema for its `type`. Invalid payloads are omitted (logged
-  server-side), not returned as errors.
-- `featured` is `Product.status = ACTIVE AND featured = true`, ordered
-  by `createdAt` desc, `id` desc, **maximum 8** cards. No pagination
-  meta.
+Used when `GET /api/catalog/products?category=:slug` (and the client
+category page). **One** Postgres round-trip. No per-child `findMany`.
 
-`HomeBlockDto` (content blocks have no slug; `id` is the only stable
-key and is allowed here):
-
-```
-{ id: string, type: 'BANNER', position: number, payload: BannerPayload }
-| { id: string, type: 'ANNOUNCEMENT', position: number, payload: AnnouncementPayload }
-| { id: string, type: 'FEATURED_COLLECTION', position: number,
-    payload: { title: string }, products: ProductCardDto[] }
+```sql
+WITH RECURSIVE tree AS (
+  SELECT id, "parentId", 1 AS depth
+  FROM "Category"
+  WHERE slug = $1
+  UNION ALL
+  SELECT c.id, c."parentId", tree.depth + 1
+  FROM "Category" c
+  INNER JOIN tree ON c."parentId" = tree.id
+  WHERE tree.depth < 8
+)
+SELECT id FROM tree;
 ```
 
-`FEATURED_COLLECTION` slugs that are missing, draft, or archived are
-dropped. Remaining products keep the **stored slug order**. If none
-remain, the block is omitted.
+Rules:
 
-### `GET /api/catalog/categories`
+- Bind `$1` (never interpolate the slug).
+- Depth is bounded at 8 so a cycle cannot recurse forever (the schema
+  does not forbid cycles).
+- Empty result → `NotFoundError` (unknown slug), **not** an empty
+  product list.
+- The product filter is `Product.categoryId IN (SELECT id FROM tree)`
+  (self + descendants).
+- `GET /api/catalog/categories` does **not** use this CTE: it loads
+  every category in **one** `findMany` and builds the tree in memory,
+  children and roots ordered by `name ASC, id ASC`.
+- `GET /api/catalog/categories/:slug` is one `findUnique` plus the
+  already-loaded parent/children from that query’s `include` (still
+  one round-trip).
 
-```
-{ categories: CategoryTreeNode[] }
-```
+---
 
-`CategoryTreeNode`: `{ slug, name, children: CategoryTreeNode[] }`.
-The array contains **root** categories (`parentId` null). Every
-category row is included (empty categories are allowed; their listing
-page shows `EmptyState`).
+## API endpoints (bodies match the Zod schemas above)
 
-### `GET /api/catalog/categories/:slug`
+### `GET /api/catalog/settings` → `storeSettingsDtoSchema`
 
-```
-{
-  slug: string,
-  name: string,
-  parent: { slug: string, name: string } | null,
-  children: { slug: string, name: string }[]
-}
-```
+404 if the singleton row is missing.
 
-404 `NOT_FOUND` if the slug does not exist.
+### `GET /api/catalog/home` → `homeResponseSchema`
 
-### `GET /api/catalog/brands`
+- `hero`: `heroContentSchema.safeParse(StoreSettings.heroContent)`.
+  Failure or empty object → `null`.
+- `blocks`: active `ContentBlock` rows ordered `position ASC, id ASC`.
+  For each row, parse `payload` with
+  `contentBlockPayloadSchemaByType[type]`. Failure → omit the block
+  (log). `FEATURED_COLLECTION` slugs resolve to `ProductCardDto[]`
+  in **stored slug order**, dropping missing/non-ACTIVE. If zero
+  products remain, omit the block. Featured collection `payload` in
+  the **response** is `{ title }` only — never the raw slug list, never
+  the raw JSON column.
+- `featured`: `ACTIVE AND featured`, ordered `createdAt DESC, id ASC`,
+  max 8.
 
-```
-{ brands: { slug: string, name: string, logoUrl: string | null }[] }
-```
+### `GET /api/catalog/categories` → `categoriesResponseSchema`
 
-Only brands that have at least one `ACTIVE` product, ordered by name
-ascending.
+### `GET /api/catalog/categories/:slug` → `categoryDetailDtoSchema`
 
-### `GET /api/catalog/products`
+404 if missing. Children ordered `name ASC, id ASC`.
 
-List query (all optional except defaults):
+### `GET /api/catalog/brands` → `brandsResponseSchema`
 
-| Param | Rule |
+Brands with ≥1 `ACTIVE` product, ordered `name ASC, id ASC`.
+
+### `GET /api/catalog/products` → `productListResponseSchema`
+
+Query: `productListQuerySchema`. Filter AND semantics. `q` matches
+name **or** description **or** any variant SKU via escaped `ILIKE
+'%' || escaped(q) || '%'`. Escape `\`, `%`, and `_` in `q` before
+wrapping.
+
+Effective variant price: `COALESCE(priceOverride, product.basePrice)`.
+Price filter: at least one variant in range; zero-variant products
+use `basePrice`.
+
+`inStock` filter uses the availability formula above (SQL:
+`("stockQty" - "reservedQty") > 0`).
+
+Sort (always final `"Product"."id" ASC`):
+
+| `sort` | primary |
 |---|---|
-| `q` | Trimmed; if present, min 2 and max 80 chars. |
-| `category` | Category slug. On `/c/:categorySlug` the client **must** send this param matching the path. Include the category and **all descendants**. Unknown slug → 404 (not an empty list). |
-| `brand` | Brand slug. Unknown slug → 404. |
-| `minPrice` | Inclusive minimum effective price (rupees). Coerced number, `>= 0`, max 1_000_000. |
-| `maxPrice` | Inclusive maximum effective price. If both set, `maxPrice >= minPrice`. |
-| `inStock` | `true` or `false`. `true` = at least one variant with `availableQty > 0`. `false` = every variant `availableQty === 0`. |
-| `sort` | `newest` (default), `price_asc`, `price_desc`, `name_asc`, `name_desc`. |
-| `page` | 1-indexed integer, default `1`, min `1`. |
-| `pageSize` | default `24`, min `1`, max `48`. |
+| `newest` (default) | `"createdAt" DESC` |
+| `name_asc` | `"name" ASC` |
+| `name_desc` | `"name" DESC` |
+| `price_asc` | `MIN(effective price) ASC` |
+| `price_desc` | `MIN(effective price) DESC` |
 
-A product matches **all** provided filters (AND). `q` matches if the
-term appears in `name` **or** `description` **or** any variant `sku`
-(case-insensitive substring).
+Out-of-range `page` → 200, `items: []`, honest `meta`.
+`totalPages` is `0` when `total` is 0, otherwise
+`ceil(total / pageSize)`.
 
-Effective unit price of a variant: `priceOverride ?? product.basePrice`.
+Unknown `category` or `brand` slug → 404.
 
-Price filter: the product matches if **at least one** variant’s
-effective price is inside `[minPrice, maxPrice]` (missing bound =
-unbounded). A product with zero variants is compared using `basePrice`
-as its sole effective price.
+### `GET /api/catalog/products/:slug` → `productDetailResponseSchema`
 
-Sort keys:
+404 if missing or not `ACTIVE`. Images: `position ASC, id ASC`.
+Variants: `createdAt ASC, id ASC`.
+`product.inStock` is the product rollup (same formula as cards).
+Each `variant.inStock` is `availableQty > 0` for **that** row.
 
-- `newest`: `createdAt DESC`, `id DESC`.
-- `name_*`: `name`, then `id`.
-- `price_*`: `MIN(effective variant price)` across **all** variants of
-  that product (not only in-stock), then `id`. Zero-variant products
-  sort by `basePrice`.
-
-Response:
-
-```
-{
-  items: ProductCardDto[],
-  meta: {
-    page: number,
-    pageSize: number,
-    total: number,
-    totalPages: number   // 0 when total is 0
-  }
-}
-```
-
-Out-of-range `page` (e.g. page 9 of 2) returns **200** with `items:
-[]` and honest `meta`. The client, if `totalPages > 0 && page >
-totalPages`, replaces the URL to `page=totalPages`.
-
-### `GET /api/catalog/products/:slug`
-
-200 `{ product: ProductDetailDto }` or 404 if missing / not `ACTIVE`.
+The server does **not** read `?variant=`. Variant selection is
+client URL state, validated against `product.variants` only.
 
 ---
 
-## Locked JSON payload shapes
+## Locked JSON column payloads
 
-These are application contracts for JSON columns. They are **not**
-Prisma migrations.
+Database JSON is parsed **only** through the per-type Zod schemas
+above (`heroContentSchema`, `bannerPayloadSchema`,
+`announcementPayloadSchema`, `featuredCollectionPayloadSchema`,
+`variantAttributesSchema`). Homepage components receive
+`HomeBlockDto` / `HeroContent` after that parse — never
+`block.payload` as `unknown` / `Record<string, unknown>`.
 
-`heroContentSchema`:
+Seed must write payloads that already satisfy those schemas.
 
-```
-{
-  title: string,              // 1–80
-  subtitle?: string,          // max 200
-  imageUrl?: string,          // https URL
-  ctaLabel?: string,          // max 40
-  ctaHref?: InternalPath      // see below
-}
-```
+Variant `attributes` keys are lowercase. Seed uses `color` on every
+variant; a second key (`impedance` or `length`) is allowed. The
+client renders every key/value as text; show `color` first when
+present.
 
-`BannerPayload`: same fields as hero.
+## Product / variant mapping rules
 
-`AnnouncementPayload`: `{ message: string, href?: InternalPath }`.
+`Money` is produced by a server helper from Prisma `Decimal` (always
+two fractional digits). Client formats with
+`Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' })`.
+Never `Number(price)` for money math on the client.
 
-`FeaturedCollectionPayload` (stored): `{ title: string, productSlugs:
-string[] }` with 1–8 slugs. The API response replaces slugs with
-resolved `products: ProductCardDto[]`.
+If `priceFrom === priceTo`, UI shows a single price; otherwise a
+range.
 
-`InternalPath`: string starting with `/`, not starting with `//`, no
-`http:`/`https:` scheme. This blocks open redirects in seed/content
-CTAs. Allowed examples: `/products`, `/c/over-ear`,
-`/p/aurelia-nova`.
-
-Variant `attributes` JSON is `Record<string, string>` with stable
-lowercase keys. Seed uses `color` on every variant; a second key
-(`impedance` or `length`) is allowed where it is real. The client
-renders every key/value as text; it does not assume a closed key set
-beyond showing `color` first when present.
-
----
-
-## Product / variant response shapes
-
-`Money` = string matching `/^\d+\.\d{2}$/`.
-
-`ImageDto`: `{ url: string, altText: string, position: number }`.
-
-`ProductCardDto` (list, featured, collection):
-
-```
-{
-  slug: string,
-  name: string,
-  brand: { slug: string, name: string } | null,
-  category: { slug: string, name: string },
-  priceFrom: Money,          // min effective variant price
-  priceTo: Money,            // max effective variant price
-  thumbnail: ImageDto | null, // lowest position image, else null
-  inStock: boolean,           // any variant availableQty > 0
-  featured: boolean
-}
-```
-
-If `priceFrom === priceTo`, the UI shows a single price; otherwise a
-range (“₹A – ₹B”).
-
-`VariantDto`:
-
-```
-{
-  sku: string,
-  attributes: Record<string, string>,
-  price: Money,               // effective price
-  inStock: boolean,
-  availableQty: number
-}
-```
-
-`ProductDetailDto`:
-
-```
-{
-  slug: string,
-  name: string,
-  description: string,
-  seoTitle: string | null,
-  seoDescription: string | null,
-  brand: { slug: string, name: string, logoUrl: string | null } | null,
-  category: { slug: string, name: string },
-  featured: boolean,
-  images: ImageDto[],          // ordered by position asc, id asc
-  variants: VariantDto[],      // stable order: createdAt asc, sku asc
-  priceFrom: Money,
-  priceTo: Money
-}
-```
-
-Public identity for products, categories, and brands is slug; for
-variants it is SKU. Those DTOs must not include Prisma UUIDs.
-`ContentBlock.id` is the exception (no slug column).
+Public identity: product/category/brand → slug; variant → SKU. Those
+DTOs must not include Prisma UUIDs. `ContentBlock.id` is the
+exception (no slug column).
 
 A product with zero variants is a seed bug. The API still returns it;
-`priceFrom`/`priceTo` are the `basePrice`; `inStock` is false;
-detail shows `EmptyState` for the variant picker (“This product is
-unavailable”).
+`priceFrom`/`priceTo` are `basePrice`; `inStock` is false; PDP shows
+`EmptyState` for the variant picker (“This product is unavailable”).
 
 ---
 
 ## Query / filter / search / pagination semantics (summary)
 
-- Default sort: `newest`.
-- Default page size: 24 (cap 48).
+- Default sort: `newest`. Default page size: 24 (cap 48).
 - Search `q` is AND-combined with filters; OR internally across
-  name/description/SKU.
-- Category filter is hierarchical (self + descendants).
-- `inStock=true` means “purchasable today if cart existed”; it uses
-  `availableQty`, not `stockQty`.
-- No relevance ranking. `q` + `sort=newest` is valid.
-- Empty `q` after trim is treated as omitted.
-- `q` of length 1 is 400, not a broad scan.
+  name/description/SKU. Substring `ILIKE` only; metacharacters
+  escaped. No search engine. No speculative indexes.
+- Category filter is self + descendants via the bounded CTE.
+- `inStock` uses `availableQty = stockQty - reservedQty` on every
+  surface (filter, card, PDP product, PDP variant).
+- No relevance ranking.
+- Empty `q` after normalize is omitted. Length 1 is 400.
+- Every list/home/tree/gallery/variant ordering ends with `id ASC`.
 
 ---
 
@@ -447,56 +675,75 @@ unavailable”).
 The listing URL is the single source of truth. Component state is
 derived from `useSearchParams`; writing filters writes the URL.
 
-| Change | History | Params written |
-|---|---|---|
-| Search text committed (debounce 300ms **or** submit) | `replace` | `q`; omit if empty |
-| Filter / sort / pageSize | `replace` | only non-default values |
-| Pagination | `push` | `page` omitted when `1` |
-| Clear filters | `replace` | drop all list params |
+| Change | History | Params | Page |
+|---|---|---|---|
+| Search committed (debounce 300ms **or** submit) | `replace` | set/omit `q` | **reset to 1** (omit `page`) |
+| `category` / `brand` / `minPrice` / `maxPrice` / `inStock` / `sort` | `replace` | only non-defaults | **reset to 1** |
+| `pageSize` | `replace` | omit if 24 | **reset to 1** |
+| Pagination | `push` | `page` omitted when `1` | keep |
+| Clear filters | `replace` | drop all list params | **reset to 1** |
 
 Defaults **must not** appear in the URL (`sort=newest`, `page=1`,
-`pageSize=24` are omitted).
+`pageSize=24` omitted).
 
 On `/c/:categorySlug`, `category` is **not** duplicated in the query
 string; it is implied by the path. The fetch still sends
-`category=:slug` to the API. Changing category navigates to another
-`/c/:slug` (or `/products` when “all”).
+`category=:slug`. Changing category navigates to another `/c/:slug`
+(or `/products` when “all”) and resets page.
 
 On `/p/:productSlug`, selected variant is `?variant=:sku` via
-`replace`. If the param is missing or unknown, select the first
-in-stock variant, else the first variant. Do not 404 the page for a
-bad `variant` query; ignore it.
+`replace`. Resolution:
 
-Search input: local draft string while typing; URL `q` updates after
-300ms debounce. Abort in-flight list requests when params change.
+```
+skus = set of product.variants[].sku          // current PDP only
+if (param is in skus) select that variant
+else select first variant with inStock === true
+else select variants[0]
+else none (empty picker)
+```
+
+A SKU that exists on **another** product is **not** in `skus` and
+must be ignored — never fetched, never displayed, never used to
+change which product is shown. Do not 404 the PDP for a bad
+`variant` query; ignore it and `replace` the URL to the valid
+selected SKU (or omit if none).
+
+Search input: local draft while typing; URL `q` updates after 300ms
+debounce (and resets page). Abort in-flight list requests when params
+change.
+
+If `totalPages > 0 && page > totalPages` after a 200, `replace` URL
+to `page=totalPages` (or omit if last page is 1).
 
 ---
 
 ## Catalog caching / data-fetching strategy
 
-**Server**
+**Server** — `publicCatalogCache` middleware on `catalogRouter` only:
 
-```
-Cache-Control: public, max-age=15, stale-while-revalidate=60
-```
+| Condition | `Cache-Control` |
+|---|---|
+| status ≥ 400 | `no-store` |
+| `Authorization` header present **or** `refreshToken` cookie present | `private, max-age=15` |
+| otherwise (anonymous success) | `public, max-age=15, stale-while-revalidate=60` |
 
-on every successful catalog GET. Error responses: `Cache-Control:
-no-store`. No `Vary: Cookie` (catalog ignores auth). ETags are not
-required.
+Never set public cache on `/api/auth` or `/api/admin`. Catalog
+handlers must not read `req.user` or include user-specific fields.
+ETags are not required. No Redis.
 
 **Client**
 
 - No catalog context and no extra dependency.
+- `apiFetch` then `schema.safeParse`; parse failure is treated as
+  a server error (`ErrorState` + retry), not rendered.
 - Each page fetches on mount and whenever its URL inputs change.
 - `AbortController` cancelled on unmount / param change.
-- Homepage: one `GET /api/catalog/home` (not three waterfalls).
-- Layout chrome: settings + categories in parallel; failure of chrome
-  fetches must not block the page outlet (store name falls back to
-  the literal `"Aurelia Audio"` already in `StorefrontLayout`,
-  categories nav simply omits extra links).
-- After a successful fetch, render from that response until the next
-  fetch settles. Do not keep a stale **filtered** list when params
-  change: show listing skeletons while the new request is in flight.
+- Homepage: one `GET /api/catalog/home`.
+- Layout chrome: settings + categories in parallel; chrome failure
+  must not block the outlet (store name falls back to `"Aurelia Audio"`,
+  category nav omits extra links).
+- On list param change, show listing skeletons until the new request
+  settles (do not keep a stale filtered grid).
 
 ---
 
@@ -689,11 +936,13 @@ can assert against them. Required fixtures:
 
 ### Unit (Vitest)
 
-- Catalog Zod schemas: defaults, `q` length 1 rejected, `maxPrice <
-  minPrice` rejected, `pageSize` 49 rejected, `sort` unknown
-  rejected, `InternalPath` rejects `https://evil.example`.
-- Helpers: effective price, `availableQty`, hierarchical category id
-  expansion, money serialization (`Decimal` → `"10.50"`).
+- Catalog Zod schemas: defaults; `q` length 1 rejected; whitespace
+  normalized; `maxPrice < minPrice` rejected; `pageSize` 49 rejected;
+  `sort` unknown rejected; `inStock=TRUE` rejected; `InternalPath`
+  rejects `https://evil.example`; response schemas reject extra
+  product UUID fields if tests construct them.
+- Helpers: effective price, `availableQty` / `inStock`, money
+  serialization (`Decimal` → `"10.50"`), ILIKE escape.
 
 ### Integration (Vitest + Supertest, `audio_commerce_test`)
 
@@ -703,14 +952,24 @@ test). Assert:
 - List returns only `ACTIVE`.
 - Draft/archived slugs 404.
 - `q` matches name and SKU; does not match a draft.
-- `category` includes descendant products and 404s unknown slugs.
+- `category` includes descendant products (grandchild of a nested
+  tree) via **one** CTE (assert with query logging or by structure:
+  only the parent slug is passed); unknown slug 404s.
+- Two products sharing `createdAt` and `name` still have a stable
+  `id ASC` order across pages.
 - `brand`, price range, `inStock` filters AND together.
-- `sort=price_asc` orders by min effective price.
+  `inStock=true` includes a product whose only in-stock variant has
+  `stockQty=5, reservedQty=4`; excludes `stockQty=1, reservedQty=1`.
+- `sort=price_asc` orders by min effective price then `id`.
 - Pagination `meta.total` / page slice; out-of-range page is 200
   empty items.
-- Home featured omits draft; collection omits missing slugs.
-- Invalid content-block payload is omitted, remaining blocks return.
+- Home featured omits draft; collection omits missing slugs; invalid
+  content-block JSON is omitted; remaining typed blocks return.
 - Public catalog GET does not require `Authorization`.
+- Anonymous 200 sets `Cache-Control` containing
+  `public` and `max-age=15`. The same GET with
+  `Authorization: Bearer x` sets `private`, not `public`. 404 sets
+  `no-store`.
 
 Auth rate-limiter skip in `NODE_ENV=test` remains; do not attach that
 limiter to catalog routes.
@@ -720,10 +979,13 @@ limiter to catalog routes.
 - `ProductCard` links to `/p/:slug` and shows `EmptyState`-safe
   missing thumbnail.
 - `ProductListPage`: changing sort writes the URL without `sort` when
-  returning to newest; shows EmptyState + clear action when the API
-  returns zero items with `q` set.
+  returning to newest **and omits `page`** (reset to 1); changing
+  `page` uses history `push`; shows EmptyState + clear action when
+  the API returns zero items with `q` set.
 - `ProductDetailPage`: variant click updates `?variant=` and displayed
-  price; OOS variant is selectable but marked unavailable.
+  price; OOS variant is selectable but marked unavailable
+  (`inStock === false`); a `?variant=` SKU from another product is
+  ignored and replaced with a SKU from the current product.
 - `Pagination` uses `push` (mock `useSearchParams` / router).
 
 ### E2E (Playwright) — introduced this phase
@@ -763,10 +1025,14 @@ Phase 2 is done when all of the following are true:
    and pagination match this spec’s AND semantics; shareable listing
    URLs restore the same results.
 5. PDP shows images in `position` order, variant prices including
-   `priceOverride`, and `availableQty`-based in-stock state. There is
-   no add-to-cart or checkout control.
+   `priceOverride`, and `availableQty`-based in-stock state on both
+   the product rollup and each variant. `?variant=` only accepts a
+   SKU of the current product. There is no add-to-cart or checkout
+   control.
 6. Production rate limiting, JWT cookie flags, and RBAC middleware
-   are unchanged. Catalog routes are public GETs only.
+   are unchanged. Catalog routes are public GETs only. Public cache
+   is short-lived and never applied to user-specific or auth
+   responses.
 7. Seed can be re-run safely and leaves the required fixtures above
    in Postgres.
 8. Loading, empty, error, reduced-motion, and labelled controls meet
@@ -780,19 +1046,27 @@ Phase 2 is done when all of the following are true:
 
 ```
 shared/src/schemas/catalog.ts
+shared/src/schemas/catalog.test.ts
 server/src/modules/catalog/catalog.routes.ts
 server/src/modules/catalog/catalog.controller.ts
 server/src/modules/catalog/catalog.service.ts
-server/src/modules/catalog/money.ts          # Decimal → Money
+server/src/modules/catalog/categoryTree.ts   # bounded recursive CTE
+server/src/modules/catalog/money.ts
+server/src/modules/catalog/availability.ts
+server/src/modules/catalog/cacheControl.ts
+server/src/modules/catalog/mapProduct.ts     # Prisma row → DTO
 server/test/catalog.integration.test.ts
+server/test/catalog.categories.test.ts
 server/prisma/seed.ts                        # extended, not replaced
+client/src/lib/parseCatalog.ts               # safeParse helpers
 client/src/pages/HomePage.tsx
 client/src/pages/ProductListPage.tsx
 client/src/pages/ProductDetailPage.tsx
-client/src/components/catalog/*              # Card, Grid, Price, FilterBar,
-                                             # Pagination, ImageGallery, VariantPicker
-client/src/App.tsx                           # new lazy routes
-client/src/layouts/StorefrontLayout.tsx      # settings + category nav
+client/src/components/catalog/*
+client/src/App.tsx
+client/src/layouts/StorefrontLayout.tsx
+e2e/catalog.spec.ts
+playwright.config.ts
 ```
 
 Existing auth, inventory decrement, and admin placeholder remain the
