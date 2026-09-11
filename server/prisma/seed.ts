@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
+import { seedCatalog } from './catalogSeed.js';
 
 const prisma = new PrismaClient();
 const DEV_ONLY_DEFAULT_PASSWORD = 'ChangeMe!Dev123';
@@ -41,15 +42,7 @@ async function main() {
     },
   });
 
-  await prisma.storeSettings.upsert({
-    where: { id: 'singleton' },
-    update: {},
-    create: {
-      id: 'singleton',
-      storeName: 'Aurelia Audio',
-      contactEmail: 'hello@aureliaaudio.demo',
-    },
-  });
+  await seedCatalog(prisma);
 }
 
 main()
