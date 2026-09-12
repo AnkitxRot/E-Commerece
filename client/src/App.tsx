@@ -11,6 +11,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage.js'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage.js'));
 const AccountPage = lazy(() => import('./pages/AccountPage.js'));
 const AdminOverviewPage = lazy(() => import('./pages/AdminOverviewPage.js'));
+const ProductListPage = lazy(() => import('./pages/ProductListPage.js'));
 
 export default function App() {
   return (
@@ -19,6 +20,8 @@ export default function App() {
         <Route element={<RootLayout />}>
           <Route element={<StorefrontLayout />}>
             <Route index element={<div className="p-6">Home — Phase 2 builds this</div>} />
+            <Route path="products" element={<ProductListPage />} />
+            <Route path="c/:categorySlug" element={<ProductListPage />} />
             <Route path="login" element={<LoginPage />} />
             <Route path="register" element={<RegisterPage />} />
             <Route element={<ProtectedRoute />}>
