@@ -13,15 +13,18 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "npm run test -w shared && npm run test -w server && npm run test -w client",
+    "test:e2e": "playwright test",
     "typecheck": "npm run build -w shared && npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
     "postinstall": "npm run prisma:generate -w server"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "concurrently": "^9.0.0",
     "eslint": "^9.9.0",
-    "typescript-eslint": "^8.5.0",
+    "playwright": "^1.63.0",
     "prettier": "^3.3.3",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.5.0"
   },
   "allowScripts": {
     "@prisma/client@5.22.0": true,
