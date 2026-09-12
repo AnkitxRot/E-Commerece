@@ -4,6 +4,7 @@ import {
   brandsResponseSchema,
   catalogSortSchema,
   categoryDetailDtoSchema,
+  normalizeSearchQuery,
   productListResponseSchema,
   type BrandDto,
   type CatalogSort,
@@ -28,9 +29,31 @@ function isAbort(err: unknown): boolean {
   );
 }
 
+const PRICE_PATTERN = /^\d+(?:\.\d{1,2})?$/;
+
 function readSort(raw: string | null): CatalogSort {
   const parsed = catalogSortSchema.safeParse(raw ?? 'newest');
   return parsed.success ? parsed.data : 'newest';
+}
+
+function isCommittableQ(raw: string): boolean {
+  const normalized = normalizeSearchQuery(raw);
+  return normalized.length === 0 || normalized.length >= 2;
+}
+
+function isCommittablePrice(raw: string): boolean {
+  return raw === '' || PRICE_PATTERN.test(raw);
+}
+
+function listQueryFromParams(searchParams: URLSearchParams, categorySlug?: string): URLSearchParams {
+  const qs = new URLSearchParams();
+  for (const [key, value] of searchParams) {
+    if (key === 'q' && !isCommittableQ(value)) continue;
+    if ((key === 'minPrice' || key === 'maxPrice') && !isCommittablePrice(value)) continue;
+    qs.set(key, value);
+  }
+  if (categorySlug) qs.set('category', categorySlug);
+  return qs;
 }
 
 export default function ProductListPage() {
@@ -38,6 +61,8 @@ export default function ProductListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [draftQ, setDraftQ] = useState(() => searchParams.get('q') ?? '');
+  const [draftMinPrice, setDraftMinPrice] = useState(() => searchParams.get('minPrice') ?? '');
+  const [draftMaxPrice, setDraftMaxPrice] = useState(() => searchParams.get('maxPrice') ?? '');
   const [list, setList] = useState<ProductListResponse | null>(null);
   const [brands, setBrands] = useState<BrandDto[]>([]);
   const [category, setCategory] = useState<CategoryDetailDto | null>(null);
@@ -47,15 +72,26 @@ export default function ProductListPage() {
   const [retryKey, setRetryKey] = useState(0);
 
   const urlQ = searchParams.get('q') ?? '';
+  const urlMinPrice = searchParams.get('minPrice') ?? '';
+  const urlMaxPrice = searchParams.get('maxPrice') ?? '';
 
   useEffect(() => {
     setDraftQ(urlQ);
   }, [urlQ]);
 
   useEffect(() => {
-    if (draftQ === urlQ) return;
+    setDraftMinPrice(urlMinPrice);
+  }, [urlMinPrice]);
+
+  useEffect(() => {
+    setDraftMaxPrice(urlMaxPrice);
+  }, [urlMaxPrice]);
+
+  useEffect(() => {
+    if (draftQ === urlQ || !isCommittableQ(draftQ)) return;
     const timer = window.setTimeout(() => {
-      setSearchParams((prev) => writeListParams(prev, { q: draftQ || undefined }, 'filter'), { replace: true });
+      const nextQ = normalizeSearchQuery(draftQ) || undefined;
+      setSearchParams((prev) => writeListParams(prev, { q: nextQ }, 'filter'), { replace: true });
     }, 300);
     return () => window.clearTimeout(timer);
   }, [draftQ, urlQ, setSearchParams]);
@@ -78,8 +114,7 @@ export default function ProductListPage() {
       setCategoryNotFound(false);
       if (!categorySlug) setCategory(null);
 
-      const qs = new URLSearchParams(searchParams);
-      if (categorySlug) qs.set('category', categorySlug);
+      const qs = listQueryFromParams(searchParams, categorySlug);
       const query = qs.toString();
       const productsUrl = `/api/catalog/products${query ? `?${query}` : ''}`;
 
@@ -158,8 +193,8 @@ export default function ProductListPage() {
   const values: FilterBarValues = {
     q: draftQ,
     brand: searchParams.get('brand') ?? '',
-    minPrice: searchParams.get('minPrice') ?? '',
-    maxPrice: searchParams.get('maxPrice') ?? '',
+    minPrice: draftMinPrice,
+    maxPrice: draftMaxPrice,
     inStock: searchParams.get('inStock') === 'true',
     sort: readSort(searchParams.get('sort')),
   };
@@ -177,27 +212,32 @@ export default function ProductListPage() {
       setDraftQ(patch.q ?? '');
       return;
     }
+    if ('minPrice' in patch) {
+      const value = patch.minPrice ?? '';
+      setDraftMinPrice(value);
+      if (!isCommittablePrice(value)) return;
+    }
+    if ('maxPrice' in patch) {
+      const value = patch.maxPrice ?? '';
+      setDraftMaxPrice(value);
+      if (!isCommittablePrice(value)) return;
+    }
     setSearchParams((prev) => writeListParams(prev, patch, 'filter'), { replace: true });
   }
 
   function onFilterSubmit(next: FilterBarValues) {
     setDraftQ(next.q);
-    setSearchParams(
-      (prev) =>
-        writeListParams(
-          prev,
-          {
-            q: next.q || undefined,
-            brand: next.brand || undefined,
-            minPrice: next.minPrice || undefined,
-            maxPrice: next.maxPrice || undefined,
-            inStock: next.inStock ? 'true' : undefined,
-            sort: next.sort,
-          },
-          'filter',
-        ),
-      { replace: true },
-    );
+    setDraftMinPrice(next.minPrice);
+    setDraftMaxPrice(next.maxPrice);
+    const patch: Record<string, string | undefined> = {
+      brand: next.brand || undefined,
+      inStock: next.inStock ? 'true' : undefined,
+      sort: next.sort,
+    };
+    if (isCommittableQ(next.q)) patch.q = normalizeSearchQuery(next.q) || undefined;
+    if (isCommittablePrice(next.minPrice)) patch.minPrice = next.minPrice || undefined;
+    if (isCommittablePrice(next.maxPrice)) patch.maxPrice = next.maxPrice || undefined;
+    setSearchParams((prev) => writeListParams(prev, patch, 'filter'), { replace: true });
   }
 
   function onPage(page: number) {
@@ -206,6 +246,8 @@ export default function ProductListPage() {
 
   function clearFilters() {
     setDraftQ('');
+    setDraftMinPrice('');
+    setDraftMaxPrice('');
     setSearchParams(new URLSearchParams(), { replace: true });
   }
 
@@ -225,18 +267,6 @@ export default function ProductListPage() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="mx-auto max-w-6xl px-6 py-8">
-        <ErrorState
-          title="Unable to load products"
-          description={error.message}
-          onRetry={() => setRetryKey((n) => n + 1)}
-        />
-      </div>
-    );
-  }
-
   const title = category?.name ?? 'Shop';
 
   return (
@@ -252,12 +282,18 @@ export default function ProductListPage() {
       </h1>
       <FilterBar values={values} brands={brands} onChange={onFilterChange} onSubmit={onFilterSubmit} />
       <div className="mt-6" aria-busy={loading || undefined}>
-        {list && !loading ? (
+        {error ? (
+          <ErrorState
+            title="Unable to load products"
+            description={error.message}
+            onRetry={() => setRetryKey((n) => n + 1)}
+          />
+        ) : list && !loading ? (
           <p className="mb-4 text-sm text-ink-muted" aria-live="polite">
             {list.meta.total} products
           </p>
         ) : null}
-        {loading ? (
+        {error ? null : loading ? (
           <ul id="product-grid" className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }, (_, index) => (
               <li key={index}>

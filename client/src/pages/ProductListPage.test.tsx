@@ -73,6 +73,32 @@ function desktopSort(): HTMLElement {
   return sort!;
 }
 
+function desktopSearch(): HTMLElement {
+  const input = document.getElementById('filter-desktop-q');
+  expect(input).not.toBeNull();
+  return input!;
+}
+
+function desktopMinPrice(): HTMLElement {
+  const input = document.getElementById('filter-desktop-min-price');
+  expect(input).not.toBeNull();
+  return input!;
+}
+
+function rejectInvalidListQuery(url: string) {
+  const qs = new URLSearchParams(url.split('?')[1] ?? '');
+  const q = qs.get('q');
+  if (q !== null && q.trim().replace(/\s+/g, ' ').length === 1) {
+    throw new ApiError(400, 'VALIDATION', 'q must be at least 2 characters');
+  }
+  for (const key of ['minPrice', 'maxPrice']) {
+    const value = qs.get(key);
+    if (value !== null && value !== '' && !/^\d+(?:\.\d{1,2})?$/.test(value)) {
+      throw new ApiError(400, 'VALIDATION', `invalid ${key}`);
+    }
+  }
+}
+
 function mockCatalog({
   list = listPayload(),
   category,
@@ -90,7 +116,10 @@ function mockCatalog({
       if (!category) throw new Error(`unexpected category fetch: ${url}`);
       return category;
     }
-    if (url === '/api/catalog/products' || url.startsWith('/api/catalog/products?')) return list;
+    if (url === '/api/catalog/products' || url.startsWith('/api/catalog/products?')) {
+      rejectInvalidListQuery(url);
+      return list;
+    }
     throw new Error(`unexpected ${url}`);
   });
 }
@@ -183,6 +212,48 @@ describe('ProductListPage', () => {
       const qs = new URLSearchParams(screen.getByTestId('search-params').textContent ?? '');
       expect(qs.get('page')).toBe('3');
     });
+  });
+
+  it('does not write a 1-character search to the URL or replace the page with ErrorState', async () => {
+    mockCatalog();
+    renderList('/products');
+    await screen.findByRole('link', { name: /Nova/ });
+
+    await userEvent.type(desktopSearch(), 'z');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    const qs = new URLSearchParams(screen.getByTestId('search-params').textContent ?? '');
+    expect(qs.get('q')).toBeNull();
+    expect(screen.getByRole('form', { name: 'Filter products' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Unable to load products' })).not.toBeInTheDocument();
+  });
+
+  it('does not write an incomplete price to the URL or replace the page with ErrorState', async () => {
+    mockCatalog();
+    renderList('/products');
+    await screen.findByRole('link', { name: /Nova/ });
+
+    await userEvent.type(desktopMinPrice(), '12.');
+
+    const qs = new URLSearchParams(screen.getByTestId('search-params').textContent ?? '');
+    expect(qs.get('minPrice')).not.toBe('12.');
+    expect(screen.getByRole('form', { name: 'Filter products' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Unable to load products' })).not.toBeInTheDocument();
+  });
+
+  it('keeps FilterBar mounted when the product list request fails', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path: string) => {
+      const url = String(path);
+      if (url.startsWith('/api/catalog/brands')) return brandsPayload;
+      if (url === '/api/catalog/products' || url.startsWith('/api/catalog/products?')) {
+        throw new ApiError(400, 'VALIDATION', 'Invalid query');
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    renderList('/products?q=ab');
+
+    expect(await screen.findByRole('heading', { name: 'Unable to load products' })).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Filter products' })).toBeInTheDocument();
   });
 
   it('fetches category from the path without putting category in the URL', async () => {
