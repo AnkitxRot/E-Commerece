@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProductListResponse } from '@audio-commerce/shared';
+import type { CategoryDetailDto, ProductListResponse } from '@audio-commerce/shared';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
 import ProductListPage from './ProductListPage.js';
 
@@ -85,8 +85,25 @@ function desktopMinPrice(): HTMLElement {
   return input!;
 }
 
+const LIST_QUERY_KEYS = new Set([
+  'q',
+  'brand',
+  'minPrice',
+  'maxPrice',
+  'inStock',
+  'sort',
+  'page',
+  'pageSize',
+  'category',
+]);
+
 function rejectInvalidListQuery(url: string) {
   const qs = new URLSearchParams(url.split('?')[1] ?? '');
+  for (const key of qs.keys()) {
+    if (!LIST_QUERY_KEYS.has(key)) {
+      throw new ApiError(400, 'VALIDATION', `unknown query key ${key}`);
+    }
+  }
   const q = qs.get('q');
   if (q !== null && q.trim().replace(/\s+/g, ' ').length === 1) {
     throw new ApiError(400, 'VALIDATION', 'q must be at least 2 characters');
@@ -105,7 +122,7 @@ function mockCatalog({
   categoryError,
 }: {
   list?: ProductListResponse;
-  category?: { slug: string; name: string; parent: null; children: [] };
+  category?: CategoryDetailDto;
   categoryError?: ApiError;
 } = {}) {
   vi.mocked(apiFetch).mockImplementation(async (path: string) => {
@@ -267,5 +284,36 @@ describe('ProductListPage', () => {
     expect(screen.getByTestId('search-params')).toHaveTextContent('');
     const productCall = vi.mocked(apiFetch).mock.calls.find(([path]) => String(path).startsWith('/api/catalog/products'));
     expect(productCall?.[0]).toContain('category=over-ear');
+  });
+
+  it('renders child category sub-nav links on a category page', async () => {
+    mockCatalog({
+      category: {
+        slug: 'headphones',
+        name: 'Headphones',
+        parent: null,
+        children: [
+          { slug: 'over-ear', name: 'Over-ear' },
+          { slug: 'in-ear', name: 'In-ear' },
+        ],
+      },
+    });
+    renderList('/c/headphones');
+
+    await screen.findByRole('heading', { level: 1, name: 'Headphones' });
+    expect(screen.getByRole('link', { name: 'Over-ear' })).toHaveAttribute('href', '/c/over-ear');
+    expect(screen.getByRole('link', { name: 'In-ear' })).toHaveAttribute('href', '/c/in-ear');
+  });
+
+  it('ignores extra query keys like utm_source and variant and still loads products', async () => {
+    mockCatalog();
+    renderList('/products?q=nova&utm_source=newsletter&variant=A1');
+
+    expect(await screen.findByRole('link', { name: /Nova/ })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Unable to load products' })).not.toBeInTheDocument();
+    const productCall = vi.mocked(apiFetch).mock.calls.find(([path]) => String(path).startsWith('/api/catalog/products'));
+    expect(String(productCall?.[0])).toContain('q=nova');
+    expect(String(productCall?.[0])).not.toContain('utm_source');
+    expect(String(productCall?.[0])).not.toMatch(/[?&]variant=/);
   });
 });

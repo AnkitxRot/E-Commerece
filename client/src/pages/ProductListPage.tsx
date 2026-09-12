@@ -45,9 +45,13 @@ function isCommittablePrice(raw: string): boolean {
   return raw === '' || PRICE_PATTERN.test(raw);
 }
 
+const LIST_QUERY_KEYS = ['q', 'brand', 'minPrice', 'maxPrice', 'inStock', 'sort', 'page', 'pageSize'] as const;
+
 function listQueryFromParams(searchParams: URLSearchParams, categorySlug?: string): URLSearchParams {
   const qs = new URLSearchParams();
-  for (const [key, value] of searchParams) {
+  for (const key of LIST_QUERY_KEYS) {
+    const value = searchParams.get(key);
+    if (value === null) continue;
     if (key === 'q' && !isCommittableQ(value)) continue;
     if ((key === 'minPrice' || key === 'maxPrice') && !isCommittablePrice(value)) continue;
     qs.set(key, value);
@@ -280,6 +284,15 @@ export default function ProductListPage() {
       <h1 ref={headingRef} tabIndex={-1} className="mb-6 text-2xl font-semibold text-ink outline-none">
         {title}
       </h1>
+      {category && category.children.length > 0 ? (
+        <nav aria-label="Subcategories" className="mb-6 flex flex-wrap gap-4 text-sm">
+          {category.children.map((child) => (
+            <Link key={child.slug} to={`/c/${child.slug}`} className="inline-flex min-h-[44px] items-center">
+              {child.name}
+            </Link>
+          ))}
+        </nav>
+      ) : null}
       <FilterBar values={values} brands={brands} onChange={onFilterChange} onSubmit={onFilterSubmit} />
       <div className="mt-6" aria-busy={loading || undefined}>
         {error ? (

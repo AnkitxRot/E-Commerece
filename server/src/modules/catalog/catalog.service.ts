@@ -164,13 +164,21 @@ export async function getHome(): Promise<HomeResponse> {
   };
 }
 
-const sortPrimary: Record<CatalogSort, Prisma.Sql> = {
-  newest: Prisma.sql`matched."createdAt" DESC`,
-  name_asc: Prisma.sql`matched.name ASC`,
-  name_desc: Prisma.sql`matched.name DESC`,
-  price_asc: Prisma.sql`matched.min_price ASC`,
-  price_desc: Prisma.sql`matched.min_price DESC`,
-};
+function sortPrimary(alias: 'matched' | 'paged', sort: CatalogSort): Prisma.Sql {
+  const col = alias === 'matched' ? Prisma.sql`matched` : Prisma.sql`paged`;
+  switch (sort) {
+    case 'newest':
+      return Prisma.sql`${col}."createdAt" DESC`;
+    case 'name_asc':
+      return Prisma.sql`${col}.name ASC`;
+    case 'name_desc':
+      return Prisma.sql`${col}.name DESC`;
+    case 'price_asc':
+      return Prisma.sql`${col}.min_price ASC`;
+    case 'price_desc':
+      return Prisma.sql`${col}.min_price DESC`;
+  }
+}
 
 function priceFilter(minPrice?: number, maxPrice?: number): Prisma.Sql {
   const variantConds: Prisma.Sql[] = [];
@@ -262,11 +270,12 @@ export async function listProducts(query: ProductListQuery): Promise<ProductList
     SELECT paged.id, meta.total
     FROM meta
     LEFT JOIN LATERAL (
-      SELECT matched.id
+      SELECT matched.id, matched."createdAt", matched.name, matched.min_price
       FROM matched
-      ORDER BY ${sortPrimary[query.sort]}, matched.id ASC
+      ORDER BY ${sortPrimary('matched', query.sort)}, matched.id ASC
       LIMIT ${query.pageSize} OFFSET ${offset}
     ) paged ON TRUE
+    ORDER BY ${sortPrimary('paged', query.sort)}, paged.id ASC
   `;
 
   const total = Number(rows[0]?.total ?? 0);
