@@ -50,6 +50,22 @@ export const categorySummarySchema = z.object({
 });
 export type CategorySummary = z.infer<typeof categorySummarySchema>;
 
+export const ratingSchema = z.number().min(0).max(5);
+
+export const specsSchema = z.record(z.string().min(1).max(60), z.string().min(1).max(200));
+export type ProductSpecs = z.infer<typeof specsSchema>;
+
+export const reviewSummaryDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    rating: z.number().int().min(1).max(5),
+    body: z.string().min(1).max(2000),
+    authorName: z.string().min(1).max(100),
+    createdAt: z.string(),
+  })
+  .strict();
+export type ReviewSummaryDto = z.infer<typeof reviewSummaryDtoSchema>;
+
 export const productCardDtoSchema = z
   .object({
     slug: slugSchema,
@@ -58,6 +74,9 @@ export const productCardDtoSchema = z
     category: categorySummarySchema,
     priceFrom: moneySchema,
     priceTo: moneySchema,
+    compareAtPrice: moneySchema.nullable(),
+    rating: ratingSchema,
+    reviewCount: z.number().int().min(0),
     thumbnail: imageDtoSchema.nullable(),
     inStock: z.boolean(),
     featured: z.boolean(),
@@ -67,9 +86,11 @@ export type ProductCardDto = z.infer<typeof productCardDtoSchema>;
 
 export const variantDtoSchema = z
   .object({
+    id: z.string().uuid(),
     sku: skuSchema,
     attributes: variantAttributesSchema,
     price: moneySchema,
+    compareAtPrice: moneySchema.nullable(),
     inStock: z.boolean(),
     availableQty: z.number().int().min(0),
   })
@@ -91,6 +112,12 @@ export const productDetailDtoSchema = z
     variants: z.array(variantDtoSchema),
     priceFrom: moneySchema,
     priceTo: moneySchema,
+    compareAtPrice: moneySchema.nullable(),
+    rating: ratingSchema,
+    reviewCount: z.number().int().min(0),
+    specs: specsSchema,
+    reviews: z.array(reviewSummaryDtoSchema),
+    relatedProducts: z.array(productCardDtoSchema),
   })
   .strict();
 export type ProductDetailDto = z.infer<typeof productDetailDtoSchema>;
@@ -158,11 +185,23 @@ export const storeSettingsDtoSchema = z.object({
 });
 export type StoreSettingsDto = z.infer<typeof storeSettingsDtoSchema>;
 
+export const homeCategoryTileDtoSchema = z
+  .object({
+    slug: slugSchema,
+    name: z.string().min(1).max(100),
+    image: imageDtoSchema.nullable(),
+  })
+  .strict();
+export type HomeCategoryTileDto = z.infer<typeof homeCategoryTileDtoSchema>;
+
 export const homeResponseSchema = z
   .object({
     hero: heroContentSchema.nullable(),
     blocks: z.array(homeBlockDtoSchema),
     featured: z.array(productCardDtoSchema).max(8),
+    bestSellers: z.array(productCardDtoSchema).max(8),
+    newArrivals: z.array(productCardDtoSchema).max(8),
+    categories: z.array(homeCategoryTileDtoSchema).max(12),
   })
   .strict();
 export type HomeResponse = z.infer<typeof homeResponseSchema>;

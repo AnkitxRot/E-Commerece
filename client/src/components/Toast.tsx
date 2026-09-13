@@ -8,8 +8,16 @@ export function Toast() {
         <div
           key={t.id}
           role="status"
+          tabIndex={0}
           onClick={() => dismiss(t.id)}
-          className={`rounded-md px-4 py-3 text-sm text-white shadow-md cursor-pointer ${
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              dismiss(t.id);
+            }
+          }}
+          aria-label={`${t.message} — dismiss`}
+          className={`cursor-pointer rounded-md px-4 py-3 text-sm text-white shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 ${
             t.variant === 'error' ? 'bg-danger' : 'bg-success'
           }`}
         >

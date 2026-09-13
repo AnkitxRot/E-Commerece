@@ -9,10 +9,13 @@ import {
   type CategoryDetailDto,
   type CategoryTreeNode,
   type HomeBlockDto,
+  type HomeCategoryTileDto,
   type HomeResponse,
+  type ProductCardDto,
   type ProductDetailDto,
   type ProductListQuery,
   type ProductListResponse,
+  type ReviewSummaryDto,
   type StoreSettingsDto,
 } from '@audio-commerce/shared';
 import { NotFoundError } from '../../errors/AppError.js';
@@ -136,7 +139,7 @@ async function mapHomeBlock(block: ContentBlock): Promise<HomeBlockDto | null> {
 }
 
 export async function getHome(): Promise<HomeResponse> {
-  const [settings, blocks, featured] = await Promise.all([
+  const [settings, blocks, featured, bestSellers, newArrivals, topCategories] = await Promise.all([
     prisma.storeSettings.findUnique({ where: { id: 'singleton' } }),
     prisma.contentBlock.findMany({
       where: { active: true },
@@ -148,6 +151,30 @@ export async function getHome(): Promise<HomeResponse> {
       take: 8,
       include: productListInclude,
     }),
+    prisma.product.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: [{ reviewCount: 'desc' }, { ratingAvg: 'desc' }, { id: 'asc' }],
+      take: 8,
+      include: productListInclude,
+    }),
+    prisma.product.findMany({
+      where: { status: 'ACTIVE' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: 8,
+      include: productListInclude,
+    }),
+    prisma.category.findMany({
+      where: { parentId: null },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      include: {
+        products: {
+          where: { status: 'ACTIVE' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          take: 1,
+          include: { images: { orderBy: [{ position: 'asc' as const }, { id: 'asc' as const }], take: 1 } },
+        },
+      },
+    }),
   ]);
 
   const heroParsed = heroContentSchema.safeParse(settings?.heroContent);
@@ -157,10 +184,22 @@ export async function getHome(): Promise<HomeResponse> {
     if (dto) mapped.push(dto);
   }
 
+  const categories: HomeCategoryTileDto[] = topCategories.map((category) => {
+    const image = category.products[0]?.images[0];
+    return {
+      slug: category.slug,
+      name: category.name,
+      image: image ? { url: image.url, altText: image.altText, position: image.position } : null,
+    };
+  });
+
   return {
     hero: heroParsed.success ? heroParsed.data : null,
     blocks: mapped,
     featured: featured.map(toCard),
+    bestSellers: bestSellers.map(toCard),
+    newArrivals: newArrivals.map(toCard),
+    categories,
   };
 }
 
@@ -300,6 +339,9 @@ export async function listProducts(query: ProductListQuery): Promise<ProductList
   return { items, meta: { page: query.page, pageSize: query.pageSize, total, totalPages } };
 }
 
+const RELATED_PRODUCTS_LIMIT = 4;
+const REVIEWS_LIMIT = 5;
+
 export async function getProductBySlug(slug: string): Promise<ProductDetailDto> {
   const product = await prisma.product.findFirst({
     where: { slug, status: 'ACTIVE' },
@@ -311,5 +353,30 @@ export async function getProductBySlug(slug: string): Promise<ProductDetailDto> 
     },
   });
   if (!product) throw new NotFoundError('Product not found');
-  return toDetail(product);
+
+  const [reviewRows, relatedRows] = await Promise.all([
+    prisma.review.findMany({
+      where: { productId: product.id, status: 'APPROVED' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+      take: REVIEWS_LIMIT,
+      include: { user: { select: { name: true } } },
+    }),
+    prisma.product.findMany({
+      where: { categoryId: product.categoryId, status: 'ACTIVE', id: { not: product.id } },
+      orderBy: [{ reviewCount: 'desc' }, { id: 'asc' }],
+      take: RELATED_PRODUCTS_LIMIT,
+      include: productListInclude,
+    }),
+  ]);
+
+  const reviews: ReviewSummaryDto[] = reviewRows.map((review) => ({
+    id: review.id,
+    rating: review.rating,
+    body: review.body,
+    authorName: review.user.name,
+    createdAt: review.createdAt.toISOString(),
+  }));
+  const relatedProducts: ProductCardDto[] = relatedRows.map(toCard);
+
+  return toDetail(product, reviews, relatedProducts);
 }

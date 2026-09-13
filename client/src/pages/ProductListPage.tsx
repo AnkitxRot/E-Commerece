@@ -21,6 +21,7 @@ import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
 import { Button } from '../components/Button.js';
+import { Breadcrumbs } from '../components/Breadcrumbs.js';
 
 function isAbort(err: unknown): boolean {
   return (
@@ -257,7 +258,7 @@ export default function ProductListPage() {
 
   if (categoryNotFound) {
     return (
-      <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
         <ErrorState
           title="Category not found"
           description="This category does not exist or is no longer available."
@@ -274,14 +275,21 @@ export default function ProductListPage() {
   const title = category?.name ?? 'Shop';
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       <a
         href="#product-grid"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-10 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2"
       >
         Skip to products
       </a>
-      <h1 ref={headingRef} tabIndex={-1} className="mb-6 text-2xl font-semibold text-ink outline-none">
+      <Breadcrumbs
+        items={
+          category
+            ? [{ label: 'Shop', href: '/products' }, { label: category.name }]
+            : [{ label: 'Shop' }]
+        }
+      />
+      <h1 ref={headingRef} tabIndex={-1} className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink outline-none">
         {title}
       </h1>
       {category && category.children.length > 0 ? (

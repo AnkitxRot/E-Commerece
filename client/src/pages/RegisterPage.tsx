@@ -11,18 +11,23 @@ export default function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ name?: string; email?: string; password?: string }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setFieldError(null);
+    setFieldErrors({});
     setServerError(null);
 
     const result = registerSchema.safeParse({ email, password, name });
     if (!result.success) {
-      setFieldError(result.error.issues[0]?.message ?? 'Please check your details.');
+      const errors: { name?: string; email?: string; password?: string } = {};
+      for (const issue of result.error.issues) {
+        const key = issue.path[0] as 'name' | 'email' | 'password' | undefined;
+        if (key && !errors[key]) errors[key] = issue.message;
+      }
+      setFieldErrors(errors);
       return;
     }
 
@@ -43,20 +48,23 @@ export default function RegisterPage() {
         Create account
       </h1>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
-        <Input id="name" label="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <Input id="email" label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input id="name" label="Name" value={name} error={fieldErrors.name} onChange={(e) => setName(e.target.value)} />
+        <Input
+          id="email"
+          label="Email"
+          type="email"
+          value={email}
+          error={fieldErrors.email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
         <Input
           id="password"
           label="Password"
           type="password"
           value={password}
+          error={fieldErrors.password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        {fieldError && (
-          <p role="alert" className="text-sm text-danger">
-            {fieldError}
-          </p>
-        )}
         {serverError && (
           <p role="alert" className="text-sm text-danger">
             {serverError}

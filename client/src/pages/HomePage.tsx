@@ -12,6 +12,8 @@ import {
 import { apiFetch } from '../lib/apiClient.js';
 import { parseCatalog } from '../lib/parseCatalog.js';
 import { ProductGrid } from '../components/catalog/ProductGrid.js';
+import { CategoryTile } from '../components/catalog/CategoryTile.js';
+import { TrustBadges } from '../components/TrustBadges.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
@@ -27,7 +29,7 @@ function HeroCta({ href, label }: { href: string; label?: string }) {
   return (
     <Link
       to={href}
-      className="inline-flex min-h-[44px] items-center rounded-md bg-accent px-4 py-2 text-sm font-medium text-white duration-snap"
+      className="inline-flex min-h-[44px] items-center rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-accent-ink duration-snap"
     >
       {label ?? 'Shop'}
     </Link>
@@ -36,28 +38,29 @@ function HeroCta({ href, label }: { href: string; label?: string }) {
 
 function Hero({ hero, headingRef }: { hero: HeroContent; headingRef: RefObject<HTMLHeadingElement> }) {
   return (
-    <section className="grid grid-cols-1 gap-6 md:grid-cols-2">
+    <section className="relative overflow-hidden rounded-xl">
       {hero.imageUrl ? (
         <img
           src={hero.imageUrl}
-          alt={hero.title}
+          alt=""
           width={1600}
           height={900}
           decoding="async"
-          className="w-full rounded-md object-cover"
+          className="aspect-[16/10] w-full object-cover sm:aspect-[16/7]"
           {...({ fetchpriority: 'high' } as { fetchpriority: 'high' })}
         />
       ) : null}
-      <div>
-        <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-ink outline-none">
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" aria-hidden="true" />
+      <div className="absolute inset-0 flex flex-col justify-end p-6 sm:p-12">
+        <h1
+          ref={headingRef}
+          tabIndex={-1}
+          className="max-w-xl text-3xl font-semibold tracking-[-0.02em] text-white outline-none sm:text-5xl"
+        >
           {hero.title}
         </h1>
-        {hero.subtitle ? <p className="mt-3 text-ink-muted">{hero.subtitle}</p> : null}
-        {hero.ctaHref ? (
-          <p className="mt-6">
-            <HeroCta href={hero.ctaHref} label={hero.ctaLabel} />
-          </p>
-        ) : null}
+        {hero.subtitle ? <p className="mt-3 max-w-lg text-base text-white/85 sm:text-lg">{hero.subtitle}</p> : null}
+        {hero.ctaHref ? <div className="mt-6">{<HeroCta href={hero.ctaHref} label={hero.ctaLabel} />}</div> : null}
       </div>
     </section>
   );
@@ -65,7 +68,7 @@ function Hero({ hero, headingRef }: { hero: HeroContent; headingRef: RefObject<H
 
 function BannerBlock({ payload }: { payload: BannerPayload }) {
   return (
-    <section className="mt-12 grid grid-cols-1 gap-6 md:grid-cols-2">
+    <section className="mt-16 grid grid-cols-1 items-center gap-8 md:grid-cols-2">
       {payload.imageUrl ? (
         <img
           src={payload.imageUrl}
@@ -74,14 +77,14 @@ function BannerBlock({ payload }: { payload: BannerPayload }) {
           height={900}
           loading="lazy"
           decoding="async"
-          className="w-full rounded-md object-cover"
+          className="w-full rounded-lg object-cover"
         />
       ) : null}
       <div>
-        <h2 className="text-xl font-semibold text-ink">{payload.title}</h2>
+        <h2 className="text-2xl font-semibold tracking-[-0.01em] text-ink">{payload.title}</h2>
         {payload.subtitle ? <p className="mt-2 text-ink-muted">{payload.subtitle}</p> : null}
         {payload.ctaHref ? (
-          <p className="mt-4">
+          <p className="mt-5">
             <HeroCta href={payload.ctaHref} label={payload.ctaLabel} />
           </p>
         ) : null}
@@ -92,7 +95,7 @@ function BannerBlock({ payload }: { payload: BannerPayload }) {
 
 function AnnouncementBlock({ payload }: { payload: AnnouncementPayload }) {
   return (
-    <p className="mt-8 rounded-md border border-border bg-surface px-4 py-3 text-sm text-ink">
+    <p className="mt-8 rounded-md border border-border bg-surface px-4 py-3 text-center text-sm text-ink">
       {payload.href ? (
         <Link to={payload.href} className="underline">
           {payload.message}
@@ -112,8 +115,8 @@ function HomeBlock({ block, listingId }: { block: HomeBlockDto; listingId?: stri
       return <AnnouncementBlock payload={block.payload} />;
     case ContentBlockType.FEATURED_COLLECTION:
       return (
-        <section className="mt-12">
-          <h2 className="mb-6 text-xl font-semibold text-ink">{block.payload.title}</h2>
+        <section className="mt-16">
+          <h2 className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink">{block.payload.title}</h2>
           <ProductGrid products={block.products} id={listingId ?? `collection-${block.id}`} />
         </section>
       );
@@ -159,7 +162,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!home) return;
-    document.title = home.hero?.title ?? 'Aurelia Audio';
+    document.title = home.hero?.title ?? 'Everyday';
     headingRef.current?.focus();
   }, [home]);
 
@@ -178,25 +181,30 @@ export default function HomePage() {
   if (loading || !home) {
     return (
       <div className="mx-auto max-w-6xl px-6 py-8">
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2" aria-busy="true">
-          <Skeleton className="aspect-video w-full" />
-          <div>
-            <Skeleton className="h-8 w-2/3" />
-            <Skeleton className="mt-4 h-4 w-full" />
-          </div>
+        <Skeleton className="aspect-[16/7] w-full rounded-xl" />
+        <div className="mt-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="aspect-[4/5] w-full rounded-lg" />
+          ))}
         </div>
       </div>
     );
   }
 
-  const empty = !home.hero && home.blocks.length === 0 && home.featured.length === 0;
+  const empty =
+    !home.hero &&
+    home.blocks.length === 0 &&
+    home.featured.length === 0 &&
+    home.bestSellers.length === 0 &&
+    home.newArrivals.length === 0 &&
+    home.categories.length === 0;
   const firstCollection = home.blocks.find(
     (block) => block.type === ContentBlockType.FEATURED_COLLECTION && block.products.length > 0,
   );
   const listingId = home.featured.length > 0 || firstCollection ? 'product-grid' : undefined;
 
   return (
-    <div className="mx-auto max-w-6xl px-6 py-8">
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
       {listingId ? (
         <a
           href="#product-grid"
@@ -209,9 +217,25 @@ export default function HomePage() {
         <Hero hero={home.hero} headingRef={headingRef} />
       ) : (
         <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold text-ink outline-none">
-          Aurelia Audio
+          Everyday
         </h1>
       )}
+
+      <section className="mt-10">
+        <TrustBadges />
+      </section>
+
+      {home.categories.length > 0 ? (
+        <section className="mt-16">
+          <h2 className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink">Shop by category</h2>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {home.categories.map((category) => (
+              <CategoryTile key={category.slug} category={category} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       {home.blocks.map((block) => (
         <HomeBlock
           key={block.id}
@@ -221,11 +245,28 @@ export default function HomePage() {
           }
         />
       ))}
+
       {home.featured.length > 0 ? (
-        <section className="mt-12">
-          <ProductGrid products={home.featured} />
+        <section className="mt-16">
+          <h2 className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink">Featured</h2>
+          <ProductGrid products={home.featured} id={listingId ?? 'product-grid'} />
         </section>
       ) : null}
+
+      {home.bestSellers.length > 0 ? (
+        <section className="mt-16">
+          <h2 className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink">Best sellers</h2>
+          <ProductGrid products={home.bestSellers} id="best-sellers-grid" />
+        </section>
+      ) : null}
+
+      {home.newArrivals.length > 0 ? (
+        <section className="mt-16">
+          <h2 className="mb-6 text-2xl font-semibold tracking-[-0.01em] text-ink">New arrivals</h2>
+          <ProductGrid products={home.newArrivals} id="new-arrivals-grid" />
+        </section>
+      ) : null}
+
       {empty ? (
         <EmptyState
           title="Nothing to show yet"

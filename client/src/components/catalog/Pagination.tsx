@@ -9,7 +9,7 @@ function pageWindow(page: number, totalPages: number): number[] {
 }
 
 const chip =
-  'inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-ink duration-snap';
+  'inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface px-3 text-sm text-ink duration-snap focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:opacity-40 disabled:pointer-events-none';
 
 export function Pagination({
   page,
@@ -30,10 +30,9 @@ export function Pagination({
       <button
         type="button"
         className={chip}
+        disabled={prevDisabled}
         aria-disabled={prevDisabled}
-        onClick={() => {
-          if (!prevDisabled) onPage(page - 1);
-        }}
+        onClick={() => onPage(page - 1)}
       >
         Previous
       </button>
@@ -51,10 +50,9 @@ export function Pagination({
       <button
         type="button"
         className={chip}
+        disabled={nextDisabled}
         aria-disabled={nextDisabled}
-        onClick={() => {
-          if (!nextDisabled) onPage(page + 1);
-        }}
+        onClick={() => onPage(page + 1)}
       >
         Next
       </button>

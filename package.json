@@ -2,6 +2,9 @@
   "name": "audio-commerce",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "shared",
     "server",
@@ -29,7 +32,7 @@
   "allowScripts": {
     "@prisma/client@5.22.0": true,
     "@prisma/engines@5.22.0": true,
-    "bcrypt@5.1.1": true,
+    "bcrypt@6.0.0": true,
     "esbuild@0.21.5": true,
     "esbuild@0.28.2": true,
     "prisma@5.22.0": true

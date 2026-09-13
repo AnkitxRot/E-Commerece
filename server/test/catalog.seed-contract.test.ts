@@ -81,7 +81,7 @@ describe('catalog seed contract', () => {
     expect(accessories?.children.map((c) => c.slug)).toEqual(['cables']);
 
     const brandSlugs = (await prisma.brand.findMany({ select: { slug: true } })).map((b) => b.slug).sort();
-    expect(brandSlugs).toEqual(['aurelia', 'helix', 'northwind', 'sable']);
+    expect(brandSlugs).toEqual(['aurelia', 'everyday', 'helix', 'northwind', 'sable']);
 
     const featuredActive = await prisma.product.count({ where: { status: 'ACTIVE', featured: true } });
     expect(featuredActive).toBeGreaterThanOrEqual(4);
@@ -92,10 +92,10 @@ describe('catalog seed contract', () => {
       expect(product.variants.length, product.slug).toBeGreaterThanOrEqual(1);
       expect(product.images.length, product.slug).toBeGreaterThanOrEqual(2);
       expect(product.images.every((img) => img.altText.trim().length > 0), product.slug).toBe(true);
+      const picsumPattern = /^https:\/\/picsum\.photos\/seed\/[a-z0-9]+(?:-[a-z0-9]+)*-\d+\/800\/800$/;
+      const commonsPattern = /^https:\/\/(thumb|upload)\.wikimedia\.org\/wikipedia\/commons\/[^\s]+$/;
       expect(
-        product.images.every((img) =>
-          /^https:\/\/picsum\.photos\/seed\/[a-z0-9]+(?:-[a-z0-9]+)*-\d+\/800\/800$/.test(img.url),
-        ),
+        product.images.every((img) => picsumPattern.test(img.url) || commonsPattern.test(img.url)),
         product.slug,
       ).toBe(true);
     }
@@ -111,7 +111,7 @@ describe('catalog seed contract', () => {
     expect(payload.productSlugs).toContain('aurelia-nova');
 
     const settings = await prisma.storeSettings.findUnique({ where: { id: 'singleton' } });
-    expect(heroContentSchema.parse(settings?.heroContent).ctaHref).toBe('/c/headphones');
+    expect(heroContentSchema.parse(settings?.heroContent).ctaHref).toBe('/products');
   });
 
   it('is idempotent on a second run', async () => {
@@ -137,6 +137,6 @@ describe('catalog seed contract', () => {
     });
     expect(novaImages).toHaveLength(2);
     const settings = await prisma.storeSettings.findUnique({ where: { id: 'singleton' } });
-    expect(heroContentSchema.parse(settings?.heroContent).ctaHref).toBe('/c/headphones');
+    expect(heroContentSchema.parse(settings?.heroContent).ctaHref).toBe('/products');
   });
 });

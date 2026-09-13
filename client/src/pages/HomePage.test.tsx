@@ -17,6 +17,9 @@ const nova: ProductCardDto = {
   category: { slug: 'over-ear', name: 'Over-ear' },
   priceFrom: '19999.00',
   priceTo: '24999.00',
+  compareAtPrice: null,
+  rating: 4.6,
+  reviewCount: 42,
   thumbnail: null,
   inStock: true,
   featured: true,
@@ -29,6 +32,9 @@ const ion: ProductCardDto = {
   category: { slug: 'in-ear', name: 'In-ear' },
   priceFrom: '18990.00',
   priceTo: '21990.00',
+  compareAtPrice: null,
+  rating: 4.2,
+  reviewCount: 17,
   thumbnail: null,
   inStock: true,
   featured: false,
@@ -64,6 +70,9 @@ const home: HomeResponse = {
     },
   ],
   featured: [nova],
+  bestSellers: [ion],
+  newArrivals: [nova],
+  categories: [{ slug: 'audio', name: 'Audio', image: null }],
 };
 
 describe('HomePage', () => {
@@ -85,8 +94,8 @@ describe('HomePage', () => {
     expect(screen.getByRole('link', { name: 'See cables' })).toHaveAttribute('href', '/c/cables');
     expect(screen.getByRole('link', { name: 'Free shipping this week' })).toHaveAttribute('href', '/products');
     expect(screen.getByRole('heading', { name: 'Desk stack' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Sable Ion/ })).toHaveAttribute('href', '/p/sable-ion');
-    expect(screen.getByRole('link', { name: /Nova/ })).toHaveAttribute('href', '/p/aurelia-nova');
+    expect(screen.getAllByRole('link', { name: /Sable Ion/ })[0]).toHaveAttribute('href', '/p/sable-ion');
+    expect(screen.getAllByRole('link', { name: /Nova/ })[0]).toHaveAttribute('href', '/p/aurelia-nova');
     expect(screen.getByRole('link', { name: 'Skip to products' })).toHaveAttribute('href', '#product-grid');
 
     const urls = vi.mocked(apiFetch).mock.calls.map(([path]) => String(path));
@@ -94,7 +103,14 @@ describe('HomePage', () => {
   });
 
   it('shows a short empty message and Shop link when home has no hero, blocks, or featured', async () => {
-    vi.mocked(apiFetch).mockResolvedValue({ hero: null, blocks: [], featured: [] });
+    vi.mocked(apiFetch).mockResolvedValue({
+      hero: null,
+      blocks: [],
+      featured: [],
+      bestSellers: [],
+      newArrivals: [],
+      categories: [],
+    });
     render(
       <MemoryRouter>
         <HomePage />

@@ -1,4 +1,27 @@
+import type { KeyboardEvent } from 'react';
 import type { VariantDto } from '@audio-commerce/shared';
+
+const ARROW_KEYS = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
+
+function handleRovingKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+  if (!ARROW_KEYS.includes(event.key)) return;
+  const group = event.currentTarget.parentElement;
+  if (!group) return;
+  const options = Array.from(group.querySelectorAll('button'));
+  const currentIndex = options.indexOf(event.currentTarget);
+  if (currentIndex === -1) return;
+  event.preventDefault();
+
+  let nextIndex = currentIndex;
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (currentIndex + 1) % options.length;
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (currentIndex - 1 + options.length) % options.length;
+  else if (event.key === 'Home') nextIndex = 0;
+  else if (event.key === 'End') nextIndex = options.length - 1;
+
+  const next = options[nextIndex];
+  next.focus();
+  next.click();
+}
 
 function attributeKeys(variants: VariantDto[]): string[] {
   const keys = new Set<string>();
@@ -54,8 +77,10 @@ export function VariantPicker({
             type="button"
             role="radio"
             aria-checked={variant.sku === selected.sku}
+            tabIndex={variant.sku === selected.sku ? 0 : -1}
             className={chip}
             onClick={() => onSelect(variant.sku)}
+            onKeyDown={handleRovingKeyDown}
           >
             {variant.sku}
           </button>
@@ -82,8 +107,10 @@ export function VariantPicker({
               type="button"
               role="radio"
               aria-checked={selected.attributes[key] === value}
+              tabIndex={selected.attributes[key] === value ? 0 : -1}
               className={chip}
               onClick={() => selectValue(key, value)}
+              onKeyDown={handleRovingKeyDown}
             >
               {value}
             </button>

@@ -4,6 +4,10 @@ import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProductDetailDto } from '@audio-commerce/shared';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
+import * as AuthContext from '../context/AuthContext.js';
+import * as CartContext from '../context/CartContext.js';
+import { ToastProvider } from '../context/ToastContext.js';
+import { Toast } from '../components/Toast.js';
 import ProductDetailPage from './ProductDetailPage.js';
 
 vi.mock('../lib/apiClient.js', async (importOriginal) => {
@@ -32,22 +36,40 @@ const helix: ProductDetailDto = {
   ],
   variants: [
     {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       sku: 'HEL-BLK-01',
       attributes: { color: 'Midnight' },
       price: '52990.00',
+      compareAtPrice: null,
       inStock: true,
       availableQty: 5,
     },
     {
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
       sku: 'HEL-OOS-01',
       attributes: { color: 'Ivory' },
       price: '54990.00',
+      compareAtPrice: null,
       inStock: false,
       availableQty: 0,
     },
   ],
   priceFrom: '52990.00',
   priceTo: '54990.00',
+  compareAtPrice: null,
+  rating: 4.4,
+  reviewCount: 21,
+  specs: { Driver: 'Planar magnetic', Weight: '380g' },
+  reviews: [
+    {
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      rating: 5,
+      body: 'Fantastic clarity.',
+      authorName: 'Priya Sharma',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+  relatedProducts: [],
 };
 
 function SearchParamsProbe() {
@@ -55,20 +77,49 @@ function SearchParamsProbe() {
   return <pre data-testid="search-params">{params.toString()}</pre>;
 }
 
+const mockAddItem = vi.fn().mockResolvedValue(undefined);
+
+function mockAuth(user: { id: string; email: string; name: string; role: 'CUSTOMER' | 'ADMIN' } | null) {
+  vi.spyOn(AuthContext, 'useAuth').mockReturnValue({
+    user,
+    status: user ? 'authenticated' : 'unauthenticated',
+    login: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+  } as unknown as ReturnType<typeof AuthContext.useAuth>);
+}
+
+function mockCart() {
+  vi.spyOn(CartContext, 'useCart').mockReturnValue({
+    cart: { items: [], itemCount: 0, subtotal: '0.00' },
+    loading: false,
+    addItem: mockAddItem,
+    updateItemQty: vi.fn(),
+    removeItem: vi.fn(),
+    clearCart: vi.fn(),
+    refresh: vi.fn(),
+  } as unknown as ReturnType<typeof CartContext.useCart>);
+}
+
 function renderPdp(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route
-          path="/p/:productSlug"
-          element={
-            <>
-              <SearchParamsProbe />
-              <ProductDetailPage />
-            </>
-          }
-        />
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route
+            path="/p/:productSlug"
+            element={
+              <>
+                <SearchParamsProbe />
+                <ProductDetailPage />
+              </>
+            }
+          />
+          <Route path="/login" element={<div>login-page</div>} />
+          <Route path="/checkout" element={<div>checkout-page</div>} />
+        </Routes>
+        <Toast />
+      </ToastProvider>
     </MemoryRouter>,
   );
 }
@@ -76,9 +127,12 @@ function renderPdp(path: string) {
 describe('ProductDetailPage', () => {
   beforeEach(() => {
     vi.mocked(apiFetch).mockReset();
+    mockAddItem.mockClear().mockResolvedValue(undefined);
     document.title = '';
     document.querySelector('meta[name="description"]')?.remove();
     vi.mocked(apiFetch).mockResolvedValue({ product: helix });
+    mockAuth({ id: 'u1', email: 'a@b.com', name: 'A', role: 'CUSTOMER' });
+    mockCart();
   });
 
   it('ignores foreign SKU NOV-BLK-00 and selects HEL-BLK-01 with that variant price', async () => {
@@ -111,11 +165,45 @@ describe('ProductDetailPage', () => {
     expect(screen.getByText('0 available')).toBeInTheDocument();
   });
 
-  it('does not render a button matching cart, buy, or checkout', async () => {
-    renderPdp('/p/helix-lineage');
-
+  it('adds the selected variant and quantity to the cart', async () => {
+    renderPdp('/p/helix-lineage?variant=HEL-BLK-01');
     await screen.findByText('HEL-BLK-01');
-    expect(screen.queryAllByRole('button', { name: /cart|buy|checkout/i })).toHaveLength(0);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Increase quantity' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add to cart' }));
+
+    await waitFor(() => {
+      expect(mockAddItem).toHaveBeenCalledWith('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 2);
+    });
+    expect(await screen.findByText('Added 2 to your cart')).toBeInTheDocument();
+  });
+
+  it('buy now adds to cart and navigates to checkout', async () => {
+    renderPdp('/p/helix-lineage?variant=HEL-BLK-01');
+    await screen.findByText('HEL-BLK-01');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Buy now' }));
+
+    expect(await screen.findByText('checkout-page')).toBeInTheDocument();
+    expect(mockAddItem).toHaveBeenCalledWith('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 1);
+  });
+
+  it('sends a signed-out shopper to login instead of adding to cart', async () => {
+    mockAuth(null);
+    renderPdp('/p/helix-lineage?variant=HEL-BLK-01');
+    await screen.findByText('HEL-BLK-01');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Add to cart' }));
+
+    expect(await screen.findByText('login-page')).toBeInTheDocument();
+    expect(mockAddItem).not.toHaveBeenCalled();
+  });
+
+  it('does not render cart actions for the out-of-stock variant', async () => {
+    renderPdp('/p/helix-lineage?variant=HEL-OOS-01');
+    await screen.findByText('HEL-OOS-01');
+    expect(screen.queryByRole('button', { name: 'Add to cart' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Buy now' })).not.toBeInTheDocument();
   });
 
   it('shows Product not found without retry', async () => {
@@ -138,5 +226,12 @@ describe('ProductDetailPage', () => {
     );
     expect(screen.getByRole('link', { name: /continue browsing/i })).toHaveAttribute('href', '/products');
     expect(screen.getByText('5 available')).toBeInTheDocument();
+  });
+
+  it('renders specifications and customer reviews', async () => {
+    renderPdp('/p/helix-lineage');
+    await screen.findByText('HEL-BLK-01');
+    expect(screen.getByText('Planar magnetic')).toBeInTheDocument();
+    expect(screen.getByText('Fantastic clarity.')).toBeInTheDocument();
   });
 });
