@@ -39,18 +39,26 @@ export async function createTestCategory() {
   return prisma.category.create({ data: { slug: `cat-${Date.now()}-${Math.random()}`, name: 'Test Category' } });
 }
 
-export async function createTestVariant(stockQty: number) {
+function randomSlugSuffix(): string {
+  return Math.random().toString(36).slice(2);
+}
+
+export async function createTestProduct(status: 'ACTIVE' | 'DRAFT' | 'ARCHIVED' = 'ACTIVE') {
   const category = await createTestCategory();
-  const product = await prisma.product.create({
+  return prisma.product.create({
     data: {
-      slug: `prod-${Date.now()}-${Math.random()}`,
+      slug: `prod-${Date.now()}-${randomSlugSuffix()}`,
       name: 'Test Headphones',
       description: 'test',
       categoryId: category.id,
       basePrice: '99.00',
-      status: 'ACTIVE',
+      status,
     },
   });
+}
+
+export async function createTestVariant(stockQty: number) {
+  const product = await createTestProduct('ACTIVE');
   return prisma.productVariant.create({
     data: {
       productId: product.id,

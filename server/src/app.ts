@@ -8,6 +8,7 @@ import { authRouter } from './modules/auth/auth.routes.js';
 import { adminRouter } from './modules/admin/admin.routes.js';
 import { catalogRouter } from './modules/catalog/catalog.routes.js';
 import { cartRouter } from './modules/cart/cart.routes.js';
+import { wishlistRouter } from './modules/wishlist/wishlist.routes.js';
 import { ordersRouter } from './modules/orders/orders.routes.js';
 
 export const app = express();
@@ -22,6 +23,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/catalog', catalogRouter);
 app.use('/api/cart', cartRouter);
+app.use('/api/wishlist', wishlistRouter);
 app.use('/api/orders', ordersRouter);
 
 app.use(errorHandler);
