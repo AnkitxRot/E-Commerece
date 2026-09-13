@@ -15,6 +15,7 @@
     "build": "npm run build -w shared && npm run build -w server && npm run build -w client",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "pretest": "npm run build -w shared",
     "test": "npm run test -w shared && npm run test -w server && npm run test -w client",
     "test:e2e": "playwright test",
     "typecheck": "npm run build -w shared && npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
