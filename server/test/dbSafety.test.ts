@@ -16,6 +16,18 @@ describe('assertIsolatedTestDatabase', () => {
   it('passes when no dev URL is available to compare against (e.g. CI)', () => {
     expect(() => assertIsolatedTestDatabase(testUrl, undefined)).not.toThrow();
   });
+
+  it('never includes the database credentials in the thrown message', () => {
+    const withCreds = 'postgresql://someuser:s3cr3t-password@localhost:5432/audio_commerce';
+    try {
+      assertIsolatedTestDatabase(withCreds, withCreds);
+      expect.unreachable('expected assertIsolatedTestDatabase to throw');
+    } catch (err) {
+      const message = (err as Error).message;
+      expect(message).not.toContain('s3cr3t-password');
+      expect(message).not.toContain('someuser');
+    }
+  });
 });
 
 describe('assertServerBootDatabaseIsolation', () => {

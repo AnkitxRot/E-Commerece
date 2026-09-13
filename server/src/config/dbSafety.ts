@@ -16,10 +16,23 @@ export function assertIsolatedTestDatabase(
 ): void {
   if (devDatabaseUrl && resolvedTestUrl === devDatabaseUrl) {
     throw new Error(
-      `Refusing to reset the database: DATABASE_URL (${resolvedTestUrl}) is identical to the ` +
-        "development database's URL. This usually means DATABASE_URL is exported in your shell " +
+      `Refusing to proceed: DATABASE_URL (${redactCredentials(resolvedTestUrl)}) is identical to ` +
+        "the development database's URL. This usually means DATABASE_URL is exported in your shell " +
         "and is shadowing server/.env.test. Run `unset DATABASE_URL` and try again.",
     );
+  }
+}
+
+/** Masks a connection string's userinfo so a thrown error is safe to print to
+ * a webServer's stdout, an HTML report, or CI logs. */
+function redactCredentials(databaseUrl: string): string {
+  try {
+    const url = new URL(databaseUrl);
+    if (url.password) url.password = '***';
+    if (url.username) url.username = '***';
+    return url.toString();
+  } catch {
+    return '<unparseable DATABASE_URL>';
   }
 }
 

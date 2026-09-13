@@ -18,7 +18,13 @@ export default defineConfig({
   workers: 1,
   use: { baseURL: 'http://localhost:5173' },
   webServer: [
-    { command: 'npm run dev -w server', port: 4000, reuseExistingServer: true, env: testEnv },
-    { command: 'npm run dev -w client', port: 5173, reuseExistingServer: true, env: testEnv },
+    // reuseExistingServer must stay false: if a plain `npm run dev` (no
+    // NODE_ENV) is already bound to these ports, reusing it would silently
+    // point E2E at the development database — neither the env override nor
+    // the server's boot guard above ever runs against a server this config
+    // didn't spawn itself. Failing to bind (port already in use) is the
+    // correct, loud failure here, not a fallback.
+    { command: 'npm run dev -w server', port: 4000, reuseExistingServer: false, env: testEnv },
+    { command: 'npm run dev -w client', port: 5173, reuseExistingServer: false, env: testEnv },
   ],
 });
