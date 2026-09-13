@@ -23,13 +23,15 @@ export function assertIsolatedTestDatabase(
   }
 }
 
-/** Masks a connection string's userinfo so a thrown error is safe to print to
- * a webServer's stdout, an HTML report, or CI logs. */
+/** Masks a connection string's userinfo and query string (a password can also
+ * be passed as e.g. ?password= or ?sslpassword=) so a thrown error is safe to
+ * print to a webServer's stdout, an HTML report, or CI logs. */
 function redactCredentials(databaseUrl: string): string {
   try {
     const url = new URL(databaseUrl);
     if (url.password) url.password = '***';
     if (url.username) url.username = '***';
+    if (url.search) url.search = '';
     return url.toString();
   } catch {
     return '<unparseable DATABASE_URL>';

@@ -11,11 +11,22 @@ import config from '../../playwright.config.js';
  * at server boot.
  */
 describe('playwright webServer environment', () => {
+  const webServers = Array.isArray(config.webServer) ? config.webServer : [config.webServer];
+
   it('forces NODE_ENV=test for every webServer entry', () => {
-    const webServers = Array.isArray(config.webServer) ? config.webServer : [config.webServer];
     expect(webServers.length).toBeGreaterThan(0);
     for (const server of webServers) {
       expect(server?.env?.NODE_ENV).toBe('test');
+    }
+  });
+
+  it('never reuses an existing server, so a plain `npm run dev` cannot be mistaken for the E2E server', () => {
+    // reuseExistingServer:true previously let Playwright silently attach to
+    // an already-running dev-mode server on these ports, bypassing the
+    // NODE_ENV override and the boot guard entirely — neither runs against
+    // a server this config didn't spawn itself.
+    for (const server of webServers) {
+      expect(server?.reuseExistingServer).toBe(false);
     }
   });
 });
