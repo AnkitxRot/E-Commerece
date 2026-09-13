@@ -12,9 +12,13 @@ const asyncHandler =
     fn(req, res).catch(next);
   };
 
+// Production keeps the strict credential-stuffing cap. Outside production it is
+// raised rather than enforced: /refresh sits behind this limiter and every hard
+// page load spends one hit, so the Playwright suite — one shared dev server
+// across every spec — would otherwise starve whichever spec runs last.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: env.NODE_ENV === 'production' ? 20 : 500,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => env.NODE_ENV === 'test',
