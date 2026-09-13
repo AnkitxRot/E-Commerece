@@ -43,6 +43,13 @@ Vite + React + TypeScript storefront. This is a demonstration project: no real p
 
    `server/.env.test` configures the separate test database and is only used when running the test suite.
 
+   **Test/dev database isolation is enforced, not just configured by convention.** The test suite
+   (`NODE_ENV=test`) always reads `DATABASE_URL` from `server/.env.test` — `server/src/config/env.ts` loads
+   it with `override: true`, so even a `DATABASE_URL` left exported in your shell from an earlier session
+   can't silently shadow it. As a second, independent safeguard, `resetDb()` (used by every integration
+   test's `beforeEach`) refuses to run if the resolved test database URL is identical to the dev database
+   URL in `server/.env`. Running the server test suite will never touch your development data.
+
 4. **Apply database migrations:**
 
    ```bash

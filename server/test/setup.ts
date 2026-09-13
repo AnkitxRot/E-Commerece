@@ -1,7 +1,24 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parse } from 'dotenv';
 import request from 'supertest';
 import { prisma } from '../src/lib/prisma.js';
 import { env } from '../src/config/env.js';
 import { app } from '../src/app.js';
+import { assertIsolatedTestDatabase } from '../src/config/dbSafety.js';
+
+const serverDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/** Best-effort: reads the dev DATABASE_URL directly from server/.env, bypassing any
+ * process.env state. Returns undefined if the file doesn't exist (e.g. in CI). */
+function readDevDatabaseUrl(): string | undefined {
+  try {
+    return parse(readFileSync(path.join(serverDir, '.env'), 'utf-8')).DATABASE_URL;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Deletes rows across nearly every table. Only ever safe against the
@@ -12,6 +29,7 @@ export async function resetDb() {
   if (env.NODE_ENV !== 'test') {
     throw new Error('resetDb() may only run when NODE_ENV=test (isolated test database).');
   }
+  assertIsolatedTestDatabase(env.DATABASE_URL, readDevDatabaseUrl());
   // Deleted in FK-dependency order: children before parents.
   await prisma.$transaction([
     prisma.auditLog.deleteMany(),
