@@ -55,6 +55,7 @@ describe('StorefrontLayout', () => {
     expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/login');
     expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register');
     expect(screen.getByRole('link', { name: 'Cart' })).toHaveAttribute('href', '/cart');
+    expect(screen.getByRole('link', { name: 'Wishlist' })).toHaveAttribute('href', '/wishlist');
   });
 
   it('uses store name and top-level shop links on success', async () => {

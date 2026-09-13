@@ -3,12 +3,33 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ContentBlockType, type HomeResponse, type ProductCardDto } from '@audio-commerce/shared';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
+import * as AuthContext from '../context/AuthContext.js';
+import * as WishlistContext from '../context/WishlistContext.js';
+import { ToastProvider } from '../context/ToastContext.js';
 import HomePage from './HomePage.js';
 
 vi.mock('../lib/apiClient.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/apiClient.js')>();
   return { ...actual, apiFetch: vi.fn() };
 });
+
+vi.spyOn(AuthContext, 'useAuth').mockReturnValue({
+  user: null,
+  status: 'unauthenticated',
+  login: vi.fn(),
+  register: vi.fn(),
+  logout: vi.fn(),
+} as unknown as ReturnType<typeof AuthContext.useAuth>);
+
+vi.spyOn(WishlistContext, 'useWishlist').mockReturnValue({
+  wishlist: { items: [] },
+  loading: false,
+  error: null,
+  isWishlisted: () => false,
+  addProduct: vi.fn(),
+  removeProduct: vi.fn(),
+  refresh: vi.fn(),
+} as unknown as ReturnType<typeof WishlistContext.useWishlist>);
 
 const nova: ProductCardDto = {
   slug: 'aurelia-nova',
@@ -84,7 +105,9 @@ describe('HomePage', () => {
     vi.mocked(apiFetch).mockResolvedValue(home);
     render(
       <MemoryRouter>
-        <HomePage />
+        <ToastProvider>
+          <HomePage />
+        </ToastProvider>
       </MemoryRouter>,
     );
 
@@ -113,7 +136,9 @@ describe('HomePage', () => {
     });
     render(
       <MemoryRouter>
-        <HomePage />
+        <ToastProvider>
+          <HomePage />
+        </ToastProvider>
       </MemoryRouter>,
     );
 
@@ -125,7 +150,9 @@ describe('HomePage', () => {
     vi.mocked(apiFetch).mockRejectedValue(new ApiError(500, 'INTERNAL', 'Request failed'));
     render(
       <MemoryRouter>
-        <HomePage />
+        <ToastProvider>
+          <HomePage />
+        </ToastProvider>
       </MemoryRouter>,
     );
 

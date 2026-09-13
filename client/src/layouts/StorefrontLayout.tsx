@@ -80,6 +80,26 @@ function CartLink({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+function WishlistLink({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <Link
+      to="/wishlist"
+      onClick={onNavigate}
+      className="inline-flex min-h-[44px] items-center gap-1.5 text-ink"
+      aria-label="Wishlist"
+    >
+      <svg viewBox="0 0 24 24" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
+        <path
+          d="M12 20.5s-7.5-4.6-10-9.2C.5 8 2 4.5 5.5 4c2-.3 3.8.7 4.9 2.2L12 8l1.6-1.8c1.1-1.5 2.9-2.5 4.9-2.2 3.5.5 5 4 3.5 7.3-2.5 4.6-10 9.2-10 9.2z"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <span className="hidden text-sm sm:inline">Wishlist</span>
+    </Link>
+  );
+}
+
 function AccountLinks({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth();
   if (user) {
@@ -222,6 +242,7 @@ export function StorefrontLayout() {
             <div className="hidden items-center gap-4 md:flex">
               <AccountLinks />
             </div>
+            <WishlistLink />
             <CartLink />
           </nav>
         </div>
@@ -252,6 +273,7 @@ export function StorefrontLayout() {
               {shopNav ? <ShopLinks categories={shopNav} onNavigate={closeDrawer} /> : null}
             </nav>
             <nav className="flex flex-col gap-3 border-t border-border pt-4 text-base" aria-label="Account">
+              <WishlistLink onNavigate={closeDrawer} />
               <AccountLinks onNavigate={closeDrawer} />
             </nav>
           </div>
