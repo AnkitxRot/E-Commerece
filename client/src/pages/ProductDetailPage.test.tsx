@@ -6,6 +6,7 @@ import type { ProductDetailDto } from '@audio-commerce/shared';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
 import * as AuthContext from '../context/AuthContext.js';
 import * as CartContext from '../context/CartContext.js';
+import * as WishlistContext from '../context/WishlistContext.js';
 import { ToastProvider } from '../context/ToastContext.js';
 import { Toast } from '../components/Toast.js';
 import ProductDetailPage from './ProductDetailPage.js';
@@ -101,6 +102,18 @@ function mockCart() {
   } as unknown as ReturnType<typeof CartContext.useCart>);
 }
 
+function mockWishlist() {
+  vi.spyOn(WishlistContext, 'useWishlist').mockReturnValue({
+    wishlist: { items: [] },
+    loading: false,
+    error: null,
+    isWishlisted: () => false,
+    addProduct: vi.fn(),
+    removeProduct: vi.fn(),
+    refresh: vi.fn(),
+  } as unknown as ReturnType<typeof WishlistContext.useWishlist>);
+}
+
 function renderPdp(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -133,6 +146,7 @@ describe('ProductDetailPage', () => {
     vi.mocked(apiFetch).mockResolvedValue({ product: helix });
     mockAuth({ id: 'u1', email: 'a@b.com', name: 'A', role: 'CUSTOMER' });
     mockCart();
+    mockWishlist();
   });
 
   it('ignores foreign SKU NOV-BLK-00 and selects HEL-BLK-01 with that variant price', async () => {

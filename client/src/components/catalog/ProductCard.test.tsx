@@ -1,9 +1,30 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ProductCardDto } from '@audio-commerce/shared';
+import * as AuthContext from '../../context/AuthContext.js';
+import * as WishlistContext from '../../context/WishlistContext.js';
+import { ToastProvider } from '../../context/ToastContext.js';
 import { ProductCard } from './ProductCard.js';
 import { ProductGrid } from './ProductGrid.js';
+
+vi.spyOn(AuthContext, 'useAuth').mockReturnValue({
+  user: null,
+  status: 'unauthenticated',
+  login: vi.fn(),
+  register: vi.fn(),
+  logout: vi.fn(),
+} as unknown as ReturnType<typeof AuthContext.useAuth>);
+
+vi.spyOn(WishlistContext, 'useWishlist').mockReturnValue({
+  wishlist: { items: [] },
+  loading: false,
+  error: null,
+  isWishlisted: () => false,
+  addProduct: vi.fn(),
+  removeProduct: vi.fn(),
+  refresh: vi.fn(),
+} as unknown as ReturnType<typeof WishlistContext.useWishlist>);
 
 const nova: ProductCardDto = {
   slug: 'aurelia-nova',
@@ -28,7 +49,9 @@ describe('ProductCard', () => {
   it('renders as a link to /p/aurelia-nova', () => {
     render(
       <MemoryRouter>
-        <ProductCard product={nova} />
+        <ToastProvider>
+          <ProductCard product={nova} />
+        </ToastProvider>
       </MemoryRouter>,
     );
     expect(screen.getByRole('link')).toHaveAttribute('href', '/p/aurelia-nova');
@@ -39,7 +62,9 @@ describe('ProductGrid', () => {
   it('renders product cards in a listing region', () => {
     render(
       <MemoryRouter>
-        <ProductGrid products={[nova]} />
+        <ToastProvider>
+          <ProductGrid products={[nova]} />
+        </ToastProvider>
       </MemoryRouter>,
     );
     expect(document.getElementById('product-grid')).toBeTruthy();

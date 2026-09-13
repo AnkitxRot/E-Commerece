@@ -16,6 +16,7 @@ import { SpecsTable } from '../components/catalog/SpecsTable.js';
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
 import { ProductGrid } from '../components/catalog/ProductGrid.js';
 import { Button } from '../components/Button.js';
+import { WishlistButton } from '../components/WishlistButton.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
@@ -221,9 +222,12 @@ export default function ProductDetailPage() {
       <div className="grid grid-cols-1 gap-8 md:grid-cols-2">
         <ImageGallery images={product.images} />
         <div>
-          <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-[-0.01em] text-ink outline-none sm:text-3xl">
-            {product.name}
-          </h1>
+          <div className="flex items-start justify-between gap-3">
+            <h1 ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-[-0.01em] text-ink outline-none sm:text-3xl">
+              {product.name}
+            </h1>
+            <WishlistButton slug={product.slug} className="shrink-0 border border-border" />
+          </div>
           {product.brand ? <p className="mt-1 text-sm text-ink-muted">{product.brand.name}</p> : null}
           <div className="mt-2">
             <RatingStars rating={product.rating} reviewCount={product.reviewCount} size="md" />

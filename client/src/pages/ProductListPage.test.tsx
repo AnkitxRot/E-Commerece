@@ -4,12 +4,33 @@ import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CategoryDetailDto, ProductListResponse } from '@audio-commerce/shared';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
+import * as AuthContext from '../context/AuthContext.js';
+import * as WishlistContext from '../context/WishlistContext.js';
+import { ToastProvider } from '../context/ToastContext.js';
 import ProductListPage from './ProductListPage.js';
 
 vi.mock('../lib/apiClient.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/apiClient.js')>();
   return { ...actual, apiFetch: vi.fn() };
 });
+
+vi.spyOn(AuthContext, 'useAuth').mockReturnValue({
+  user: null,
+  status: 'unauthenticated',
+  login: vi.fn(),
+  register: vi.fn(),
+  logout: vi.fn(),
+} as unknown as ReturnType<typeof AuthContext.useAuth>);
+
+vi.spyOn(WishlistContext, 'useWishlist').mockReturnValue({
+  wishlist: { items: [] },
+  loading: false,
+  error: null,
+  isWishlisted: () => false,
+  addProduct: vi.fn(),
+  removeProduct: vi.fn(),
+  refresh: vi.fn(),
+} as unknown as ReturnType<typeof WishlistContext.useWishlist>);
 
 const novaCard = {
   slug: 'aurelia-nova',
@@ -46,26 +67,28 @@ function SearchParamsProbe() {
 function renderList(path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route
-          path="/products"
-          element={
-            <>
-              <SearchParamsProbe />
-              <ProductListPage />
-            </>
-          }
-        />
-        <Route
-          path="/c/:categorySlug"
-          element={
-            <>
-              <SearchParamsProbe />
-              <ProductListPage />
-            </>
-          }
-        />
-      </Routes>
+      <ToastProvider>
+        <Routes>
+          <Route
+            path="/products"
+            element={
+              <>
+                <SearchParamsProbe />
+                <ProductListPage />
+              </>
+            }
+          />
+          <Route
+            path="/c/:categorySlug"
+            element={
+              <>
+                <SearchParamsProbe />
+                <ProductListPage />
+              </>
+            }
+          />
+        </Routes>
+      </ToastProvider>
     </MemoryRouter>,
   );
 }

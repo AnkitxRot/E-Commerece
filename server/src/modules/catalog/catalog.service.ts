@@ -86,7 +86,7 @@ export async function getBrands(): Promise<BrandsResponse> {
   return { brands };
 }
 
-const productListInclude = {
+export const productListInclude = {
   brand: true,
   category: true,
   variants: true,
