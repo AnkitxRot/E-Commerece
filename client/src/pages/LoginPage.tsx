@@ -10,18 +10,23 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    setFieldError(null);
+    setFieldErrors({});
     setServerError(null);
 
     const result = loginSchema.safeParse({ email, password });
     if (!result.success) {
-      setFieldError(result.error.issues[0]?.message ?? 'Please enter a valid email and password.');
+      const errors: { email?: string; password?: string } = {};
+      for (const issue of result.error.issues) {
+        const key = issue.path[0] as 'email' | 'password' | undefined;
+        if (key && !errors[key]) errors[key] = issue.message;
+      }
+      setFieldErrors(errors);
       return;
     }
 
@@ -42,19 +47,22 @@ export default function LoginPage() {
         Log in
       </h1>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
-        <Input id="email" label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Input
+          id="email"
+          label="Email"
+          type="email"
+          value={email}
+          error={fieldErrors.email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
         <Input
           id="password"
           label="Password"
           type="password"
           value={password}
+          error={fieldErrors.password}
           onChange={(e) => setPassword(e.target.value)}
         />
-        {fieldError && (
-          <p role="alert" className="text-sm text-danger">
-            {fieldError}
-          </p>
-        )}
         {serverError && (
           <p role="alert" className="text-sm text-danger">
             {serverError}

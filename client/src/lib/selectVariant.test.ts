@@ -4,8 +4,10 @@ import { selectVariantSku } from './selectVariant.js';
 
 function variant(partial: Pick<VariantDto, 'sku' | 'inStock'> & Partial<VariantDto>): VariantDto {
   return {
+    id: `id-${partial.sku}`,
     attributes: { color: 'Midnight' },
     price: '52990.00',
+    compareAtPrice: null,
     availableQty: partial.inStock ? 5 : 0,
     ...partial,
   };
@@ -26,6 +28,12 @@ function product(variants: VariantDto[]): ProductDetailDto {
     variants,
     priceFrom: '52990.00',
     priceTo: '52990.00',
+    compareAtPrice: null,
+    rating: 4.5,
+    reviewCount: 10,
+    specs: {},
+    reviews: [],
+    relatedProducts: [],
   };
 }
 

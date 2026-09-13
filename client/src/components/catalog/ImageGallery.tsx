@@ -31,7 +31,7 @@ export function ImageGallery({ images }: { images: ImageDto[] }) {
                 type="button"
                 aria-label={image.altText}
                 aria-current={index === active ? 'true' : undefined}
-                className="min-h-[44px] min-w-[44px] overflow-hidden rounded-md border border-border duration-snap"
+                className="min-h-[44px] min-w-[44px] rounded-md border border-border duration-snap focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                 onClick={() => setActive(index)}
               >
                 <img
@@ -41,7 +41,7 @@ export function ImageGallery({ images }: { images: ImageDto[] }) {
                   height={80}
                   loading="lazy"
                   decoding="async"
-                  className="h-16 w-16 object-cover"
+                  className="h-16 w-16 rounded-md object-cover"
                 />
               </button>
             </li>

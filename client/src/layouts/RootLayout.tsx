@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import { AuthProvider } from '../context/AuthContext.js';
+import { CartProvider } from '../context/CartContext.js';
 import { ToastProvider } from '../context/ToastContext.js';
 import { Toast } from '../components/Toast.js';
 import { ErrorBoundary } from '../components/ErrorBoundary.js';
@@ -9,8 +10,10 @@ export function RootLayout() {
     <ErrorBoundary>
       <ToastProvider>
         <AuthProvider>
-          <Outlet />
-          <Toast />
+          <CartProvider>
+            <Outlet />
+            <Toast />
+          </CartProvider>
         </AuthProvider>
       </ToastProvider>
     </ErrorBoundary>

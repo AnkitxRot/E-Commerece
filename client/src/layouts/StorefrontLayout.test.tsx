@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
 import * as AuthContext from '../context/AuthContext.js';
+import * as CartContext from '../context/CartContext.js';
 import { StorefrontLayout } from './StorefrontLayout.js';
 
 vi.mock('../lib/apiClient.js', async (importOriginal) => {
@@ -10,7 +11,7 @@ vi.mock('../lib/apiClient.js', async (importOriginal) => {
   return { ...actual, apiFetch: vi.fn() };
 });
 
-function renderLayout() {
+function renderLayout(itemCount = 0) {
   vi.spyOn(AuthContext, 'useAuth').mockReturnValue({
     user: null,
     status: 'unauthenticated',
@@ -18,6 +19,16 @@ function renderLayout() {
     register: vi.fn(),
     logout: vi.fn(),
   } as unknown as ReturnType<typeof AuthContext.useAuth>);
+
+  vi.spyOn(CartContext, 'useCart').mockReturnValue({
+    cart: { items: [], itemCount, subtotal: '0.00' },
+    loading: false,
+    addItem: vi.fn(),
+    updateItemQty: vi.fn(),
+    removeItem: vi.fn(),
+    clearCart: vi.fn(),
+    refresh: vi.fn(),
+  } as unknown as ReturnType<typeof CartContext.useCart>);
 
   return render(
     <MemoryRouter initialEntries={['/']}>
@@ -35,15 +46,15 @@ describe('StorefrontLayout', () => {
     vi.mocked(apiFetch).mockReset();
   });
 
-  it('keeps Aurelia Audio and auth links when settings and categories fail', async () => {
+  it('keeps the Everyday brand name and auth links when settings and categories fail', async () => {
     vi.mocked(apiFetch).mockRejectedValue(new ApiError(500, 'INTERNAL', 'Request failed'));
     renderLayout();
 
     expect(await screen.findByText('home-outlet')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Aurelia Audio' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Everyday' })).toHaveAttribute('href', '/');
     expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute('href', '/login');
     expect(screen.getByRole('link', { name: 'Create account' })).toHaveAttribute('href', '/register');
-    expect(screen.queryByRole('link', { name: /cart|wishlist/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Cart' })).toHaveAttribute('href', '/cart');
   });
 
   it('uses store name and top-level shop links on success', async () => {
@@ -75,7 +86,26 @@ describe('StorefrontLayout', () => {
     expect(categoryLinks.every((link) => link.getAttribute('href') === '/c/over-ear')).toBe(true);
     expect(screen.queryByRole('link', { name: 'Closed-back' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Log in' })).toBeInTheDocument();
-    expect(screen.queryAllByRole('link', { name: /cart|wishlist/i })).toHaveLength(0);
     expect(screen.getByText('home-outlet')).toBeInTheDocument();
+  });
+
+  it('shows the cart item count as an accessible label', async () => {
+    vi.mocked(apiFetch).mockRejectedValue(new ApiError(500, 'INTERNAL', 'Request failed'));
+    renderLayout(3);
+    expect(await screen.findByRole('link', { name: 'Cart, 3 items' })).toHaveAttribute('href', '/cart');
+  });
+
+  it('opens and closes the mobile navigation drawer', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    vi.mocked(apiFetch).mockRejectedValue(new ApiError(500, 'INTERNAL', 'Request failed'));
+    renderLayout();
+
+    await screen.findByText('home-outlet');
+    expect(screen.queryByLabelText('Close menu')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open menu' }));
+    expect(screen.getAllByLabelText('Close menu').length).toBeGreaterThan(0);
+    await user.click(screen.getAllByRole('button', { name: 'Close menu' })[0]);
+    expect(screen.queryByLabelText('Close menu')).not.toBeInTheDocument();
   });
 });

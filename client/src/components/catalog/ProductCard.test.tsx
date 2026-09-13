@@ -12,6 +12,9 @@ const nova: ProductCardDto = {
   category: { slug: 'over-ear', name: 'Over-ear' },
   priceFrom: '19999.00',
   priceTo: '24999.00',
+  compareAtPrice: null,
+  rating: 4.6,
+  reviewCount: 128,
   thumbnail: {
     url: 'https://picsum.photos/seed/aurelia-nova-0/800/800',
     altText: 'Aurelia Nova over-ear headphones in midnight black',
