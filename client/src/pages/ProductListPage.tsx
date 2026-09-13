@@ -336,6 +336,16 @@ export default function ProductListPage() {
                   </Button>
                 }
               />
+            ) : categorySlug ? (
+              <EmptyState
+                title="No products in this category yet"
+                description={`${title} has no products right now.`}
+                action={
+                  <Link to="/products" className="text-sm text-ink underline">
+                    View all products
+                  </Link>
+                }
+              />
             ) : (
               <EmptyState title="No products yet" description="The catalog has no products yet." />
             )}

@@ -214,6 +214,19 @@ describe('ProductListPage', () => {
     expect(screen.getByRole('button', { name: /clear filters/i })).toBeInTheDocument();
   });
 
+  it('shows a category-scoped empty message and a link to all products for an empty category with no filters', async () => {
+    mockCatalog({
+      list: { items: [], meta: { page: 1, pageSize: 24, total: 0, totalPages: 0 } },
+      category: { slug: 'in-ear', name: 'In-ear', parent: null, children: [] },
+    });
+    renderList('/c/in-ear');
+
+    expect(await screen.findByText('No products in this category yet')).toBeInTheDocument();
+    expect(screen.queryByText('The catalog has no products yet.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /clear filters/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /view all products/i })).toHaveAttribute('href', '/products');
+  });
+
   it('shows Category not found without retry and links to /products', async () => {
     mockCatalog({
       categoryError: new ApiError(404, 'NOT_FOUND', 'Category not found'),
