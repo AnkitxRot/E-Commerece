@@ -11,6 +11,7 @@ import { ImageGallery } from '../components/catalog/ImageGallery.js';
 import { Price } from '../components/catalog/Price.js';
 import { VariantPicker } from '../components/catalog/VariantPicker.js';
 import { RatingStars } from '../components/RatingStars.js';
+import { ReviewForm } from '../components/reviews/ReviewForm.js';
 import { QuantityStepper } from '../components/QuantityStepper.js';
 import { SpecsTable } from '../components/catalog/SpecsTable.js';
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
@@ -291,9 +292,9 @@ export default function ProductDetailPage() {
         </section>
       ) : null}
 
-      {product.reviews.length > 0 ? (
-        <section className="mt-16 max-w-2xl">
-          <h2 className="mb-4 text-xl font-semibold tracking-[-0.01em] text-ink">Customer reviews</h2>
+      <section className="mt-16 max-w-2xl">
+        <h2 className="mb-4 text-xl font-semibold tracking-[-0.01em] text-ink">Customer reviews</h2>
+        {product.reviews.length > 0 ? (
           <ul className="flex flex-col gap-5">
             {product.reviews.map((review) => (
               <li key={review.id} className="border-b border-border pb-5 last:border-0">
@@ -303,8 +304,14 @@ export default function ProductDetailPage() {
               </li>
             ))}
           </ul>
-        </section>
-      ) : null}
+        ) : (
+          <p className="text-sm text-ink-muted">No reviews yet.</p>
+        )}
+        <div className="mt-8 border-t border-border pt-6">
+          <h3 className="mb-3 text-base font-semibold text-ink">Write a review</h3>
+          <ReviewForm productSlug={product.slug} />
+        </div>
+      </section>
 
       {product.relatedProducts.length > 0 ? (
         <section className="mt-16">
