@@ -5,6 +5,7 @@ import { dashboardRouter } from './dashboard.routes.js';
 import { adminProductsRouter } from './products.routes.js';
 import { adminOrdersRouter } from './orders/orders.routes.js';
 import { adminLookupsRouter } from './lookups.routes.js';
+import { adminReviewsRouter } from './reviews/reviews.routes.js';
 
 export const adminRouter = Router();
 
@@ -13,3 +14,4 @@ adminRouter.use(dashboardRouter);
 adminRouter.use(adminLookupsRouter);
 adminRouter.use('/products', adminProductsRouter);
 adminRouter.use('/orders', adminOrdersRouter);
+adminRouter.use('/reviews', adminReviewsRouter);
