@@ -10,8 +10,10 @@ async function main() {
     throw new Error('Refusing to run the demo seed against a production environment.');
   }
 
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? DEV_ONLY_DEFAULT_PASSWORD;
-  const customerPassword = process.env.SEED_CUSTOMER_PASSWORD ?? DEV_ONLY_DEFAULT_PASSWORD;
+  // `||`, not `??` — an empty string (e.g. `SEED_ADMIN_PASSWORD=` left blank in .env, exactly
+  // as .env.example ships it) must also fall back to the documented default.
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD || DEV_ONLY_DEFAULT_PASSWORD;
+  const customerPassword = process.env.SEED_CUSTOMER_PASSWORD || DEV_ONLY_DEFAULT_PASSWORD;
 
   if (!process.env.SEED_ADMIN_PASSWORD || !process.env.SEED_CUSTOMER_PASSWORD) {
     console.warn(
