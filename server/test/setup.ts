@@ -1,5 +1,7 @@
+import request from 'supertest';
 import { prisma } from '../src/lib/prisma.js';
 import { env } from '../src/config/env.js';
+import { app } from '../src/app.js';
 
 /**
  * Deletes rows across nearly every table. Only ever safe against the
@@ -57,4 +59,17 @@ export async function createTestVariant(stockQty: number) {
       stockQty,
     },
   });
+}
+
+/** Registers a user, promotes it to ADMIN, then re-authenticates so the returned token's role claim is current. */
+export async function registerAdmin(email: string, password = 'password123'): Promise<string> {
+  await request(app).post('/api/auth/register').send({ email, password, name: 'Admin User' });
+  await prisma.user.update({ where: { email }, data: { role: 'ADMIN' } });
+  const loginRes = await request(app).post('/api/auth/login').send({ email, password });
+  return loginRes.body.accessToken as string;
+}
+
+export async function registerCustomer(email: string, password = 'password123'): Promise<string> {
+  const res = await request(app).post('/api/auth/register').send({ email, password, name: 'Customer User' });
+  return res.body.accessToken as string;
 }
