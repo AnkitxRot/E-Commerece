@@ -7,6 +7,8 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { authRouter } from './modules/auth/auth.routes.js';
 import { adminRouter } from './modules/admin/admin.routes.js';
 import { catalogRouter } from './modules/catalog/catalog.routes.js';
+import { cartRouter } from './modules/cart/cart.routes.js';
+import { ordersRouter } from './modules/orders/orders.routes.js';
 
 export const app = express();
 
@@ -19,5 +21,7 @@ app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 app.use('/api/auth', authRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/catalog', catalogRouter);
+app.use('/api/cart', cartRouter);
+app.use('/api/orders', ordersRouter);
 
 app.use(errorHandler);
