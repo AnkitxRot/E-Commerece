@@ -27,7 +27,7 @@ describe('admin route RBAC', () => {
     const loginRes = await request(app).post('/api/auth/login').send({ email: 'admin2@example.com', password: 'password123' });
     const res = await request(app).get('/api/admin/overview').set('Authorization', `Bearer ${loginRes.body.accessToken}`);
     expect(res.status).toBe(200);
-    expect(res.body.message).toBe('Admin area placeholder');
+    expect(res.body).toHaveProperty('productCount');
   });
 
   it('rejects a malformed bearer token with 401', async () => {

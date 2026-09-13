@@ -11,6 +11,10 @@ const LoginPage = lazy(() => import('./pages/LoginPage.js'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage.js'));
 const AccountPage = lazy(() => import('./pages/AccountPage.js'));
 const AdminOverviewPage = lazy(() => import('./pages/AdminOverviewPage.js'));
+const AdminProductsPage = lazy(() => import('./pages/AdminProductsPage.js'));
+const AdminProductFormPage = lazy(() => import('./pages/AdminProductFormPage.js'));
+const AdminOrdersPage = lazy(() => import('./pages/AdminOrdersPage.js'));
+const AdminOrderDetailPage = lazy(() => import('./pages/AdminOrderDetailPage.js'));
 const ProductListPage = lazy(() => import('./pages/ProductListPage.js'));
 const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage.js'));
 const HomePage = lazy(() => import('./pages/HomePage.js'));
@@ -44,6 +48,11 @@ export default function App() {
           <Route element={<ProtectedRoute role={Role.ADMIN} />}>
             <Route element={<AdminLayout />}>
               <Route path="admin" element={<AdminOverviewPage />} />
+              <Route path="admin/products" element={<AdminProductsPage />} />
+              <Route path="admin/products/new" element={<AdminProductFormPage />} />
+              <Route path="admin/products/:id" element={<AdminProductFormPage />} />
+              <Route path="admin/orders" element={<AdminOrdersPage />} />
+              <Route path="admin/orders/:id" element={<AdminOrderDetailPage />} />
             </Route>
           </Route>
         </Route>
