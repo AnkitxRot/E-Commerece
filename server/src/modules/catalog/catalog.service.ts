@@ -52,17 +52,19 @@ export async function getSettings(): Promise<StoreSettingsDto> {
 
 export async function getCategoryTree(): Promise<CategoriesResponse> {
   const rows = await prisma.category.findMany({
+    where: { isActive: true },
     select: { id: true, slug: true, name: true, parentId: true },
   });
   return { categories: assembleTree(rows) };
 }
 
 export async function getCategoryBySlug(slug: string): Promise<CategoryDetailDto> {
-  const category = await prisma.category.findUnique({
-    where: { slug },
+  const category = await prisma.category.findFirst({
+    where: { slug, isActive: true },
     include: {
       parent: { select: { slug: true, name: true } },
       children: {
+        where: { isActive: true },
         select: { slug: true, name: true },
         orderBy: [{ name: 'asc' }, { id: 'asc' }],
       },
@@ -79,7 +81,7 @@ export async function getCategoryBySlug(slug: string): Promise<CategoryDetailDto
 
 export async function getBrands(): Promise<BrandsResponse> {
   const brands = await prisma.brand.findMany({
-    where: { products: { some: { status: 'ACTIVE' } } },
+    where: { isActive: true, products: { some: { status: 'ACTIVE' } } },
     orderBy: [{ name: 'asc' }, { id: 'asc' }],
     select: { slug: true, name: true, logoUrl: true },
   });
@@ -164,7 +166,7 @@ export async function getHome(): Promise<HomeResponse> {
       include: productListInclude,
     }),
     prisma.category.findMany({
-      where: { parentId: null },
+      where: { parentId: null, isActive: true },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
       include: {
         products: {
@@ -253,7 +255,7 @@ export async function listProducts(query: ProductListQuery): Promise<ProductList
 
   if (query.brand) {
     const brand = await prisma.brand.findUnique({ where: { slug: query.brand } });
-    if (!brand) throw new NotFoundError('Brand not found');
+    if (!brand || !brand.isActive) throw new NotFoundError('Brand not found');
     filters.push(Prisma.sql`p."brandId" = ${brand.id}`);
   }
 
