@@ -8,12 +8,12 @@ export async function resolveCategoryAndDescendantIds(slug: string): Promise<str
     WITH RECURSIVE tree AS (
       SELECT id, "parentId", 1 AS depth
       FROM "Category"
-      WHERE slug = ${slug}
+      WHERE slug = ${slug} AND "isActive" = true
       UNION ALL
       SELECT c.id, c."parentId", tree.depth + 1
       FROM "Category" c
       INNER JOIN tree ON c."parentId" = tree.id
-      WHERE tree.depth < ${MAX_CATEGORY_DEPTH}
+      WHERE tree.depth < ${MAX_CATEGORY_DEPTH} AND c."isActive" = true
     )
     SELECT id FROM tree
   `;

@@ -49,6 +49,33 @@ describe('GET /api/catalog/categories', () => {
     const missing = await request(app).get('/api/catalog/categories/nope');
     expect(missing.status).toBe(404);
   });
+
+  it('excludes an inactive category from the tree, its own detail lookup, and ?category= filtering by its own slug', async () => {
+    const headphones = await prisma.category.create({ data: { slug: 'headphones', name: 'Headphones', isActive: false } });
+    await prisma.category.create({ data: { slug: 'over-ear', name: 'Over-ear', parentId: headphones.id } });
+    await prisma.category.create({ data: { slug: 'accessories', name: 'Accessories' } });
+
+    const tree = await request(app).get('/api/catalog/categories');
+    expect(tree.status).toBe(200);
+    // The inactive root — and its still-active child, unreachable from the tree root — are both absent.
+    expect(tree.body.categories.map((c: { slug: string }) => c.slug)).toEqual(['accessories']);
+
+    const detail = await request(app).get('/api/catalog/categories/headphones');
+    expect(detail.status).toBe(404);
+
+    await prisma.product.create({
+      data: {
+        slug: 'headphones-prod',
+        name: 'Some headphones',
+        description: 'd',
+        categoryId: headphones.id,
+        basePrice: '10.00',
+        status: 'ACTIVE',
+      },
+    });
+    const filtered = await request(app).get('/api/catalog/products').query({ category: 'headphones' });
+    expect(filtered.status).toBe(404);
+  });
 });
 
 describe('GET /api/catalog/brands', () => {
@@ -70,6 +97,29 @@ describe('GET /api/catalog/brands', () => {
     const res = await request(app).get('/api/catalog/brands');
     expect(res.status).toBe(200);
     expect(res.body.brands.map((b: { slug: string }) => b.slug)).toEqual(['aurelia']);
+  });
+
+  it('excludes an inactive brand from the public list and from ?brand= filtering', async () => {
+    const cat = await prisma.category.create({ data: { slug: 'c2', name: 'C2' } });
+    const inactive = await prisma.brand.create({ data: { slug: 'retired', name: 'Retired', isActive: false } });
+    await prisma.product.create({
+      data: {
+        slug: 'retired-prod',
+        name: 'Retired product',
+        description: 'd',
+        categoryId: cat.id,
+        brandId: inactive.id,
+        basePrice: '10.00',
+        status: 'ACTIVE',
+      },
+    });
+
+    const res = await request(app).get('/api/catalog/brands');
+    expect(res.status).toBe(200);
+    expect(res.body.brands.map((b: { slug: string }) => b.slug)).not.toContain('retired');
+
+    const filtered = await request(app).get('/api/catalog/products').query({ brand: 'retired' });
+    expect(filtered.status).toBe(404);
   });
 });
 

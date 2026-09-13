@@ -123,4 +123,53 @@ describe('admin products', () => {
     expect(brandsRes.status).toBe(200);
     expect(Array.isArray(brandsRes.body.brands)).toBe(true);
   });
+
+  it('rejects assigning an inactive category or brand, but tolerates one already in place', async () => {
+    const token = await registerAdmin('prod-admin5@example.com');
+    const category = await createTestCategory();
+    const inactiveCategory = await prisma.category.create({
+      data: { slug: `inactive-cat-${Date.now()}`, name: 'Retired', isActive: false },
+    });
+    const brand = await prisma.brand.create({ data: { slug: `brand-${Date.now()}`, name: 'Live Brand' } });
+    const inactiveBrand = await prisma.brand.create({
+      data: { slug: `inactive-brand-${Date.now()}`, name: 'Retired Brand', isActive: false },
+    });
+
+    const createWithInactiveCategory = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(inactiveCategory.id));
+    expect(createWithInactiveCategory.status).toBe(400);
+
+    const createWithInactiveBrand = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id, { brandId: inactiveBrand.id }));
+    expect(createWithInactiveBrand.status).toBe(400);
+
+    const createRes = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id, { brandId: brand.id }));
+    expect(createRes.status).toBe(201);
+    const productId = createRes.body.product.id;
+
+    const reassignInactiveCategory = await request(app)
+      .patch(`/api/admin/products/${productId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ categoryId: inactiveCategory.id });
+    expect(reassignInactiveCategory.status).toBe(400);
+
+    // Deactivate the category/brand this product already uses — an unrelated
+    // field update must still succeed (no retroactive re-validation).
+    await prisma.category.update({ where: { id: category.id }, data: { isActive: false } });
+    await prisma.brand.update({ where: { id: brand.id }, data: { isActive: false } });
+    const unrelatedUpdate = await request(app)
+      .patch(`/api/admin/products/${productId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ featured: true });
+    expect(unrelatedUpdate.status).toBe(200);
+    expect(unrelatedUpdate.body.product.categoryId).toBe(category.id);
+    expect(unrelatedUpdate.body.product.brandId).toBe(brand.id);
+  });
 });

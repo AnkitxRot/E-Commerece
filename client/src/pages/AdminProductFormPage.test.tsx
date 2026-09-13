@@ -12,8 +12,34 @@ vi.mock('../lib/apiClient.js', async (importOriginal) => {
 
 const CATEGORY_ID = '11111111-1111-4111-8111-111111111111';
 const BRAND_ID = '22222222-2222-4222-8222-222222222222';
-const CATEGORIES = { categories: [{ id: CATEGORY_ID, name: 'Headphones' }] };
-const BRANDS = { brands: [{ id: BRAND_ID, name: 'Aurelia' }] };
+const CATEGORIES = {
+  categories: [
+    {
+      id: CATEGORY_ID,
+      slug: 'headphones',
+      name: 'Headphones',
+      parentId: null,
+      parentName: null,
+      isActive: true,
+      productCount: 0,
+      childCount: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+};
+const BRANDS = {
+  brands: [
+    {
+      id: BRAND_ID,
+      slug: 'aurelia',
+      name: 'Aurelia',
+      logoUrl: null,
+      isActive: true,
+      productCount: 0,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    },
+  ],
+};
 
 function renderNew() {
   return render(

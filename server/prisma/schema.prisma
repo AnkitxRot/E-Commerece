@@ -104,10 +104,12 @@ model Category {
   parent    Category?  @relation("CategoryTree", fields: [parentId], references: [id])
   children  Category[] @relation("CategoryTree")
   products  Product[]
+  isActive  Boolean    @default(true)
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
 
   @@index([parentId])
+  @@index([isActive])
 }
 
 model Brand {
@@ -116,8 +118,11 @@ model Brand {
   name      String
   logoUrl   String?
   products  Product[]
+  isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  @@index([isActive])
 }
 
 model Product {

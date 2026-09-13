@@ -141,17 +141,24 @@ export async function getProductById(id: string): Promise<AdminProductDetailDto>
   return toDetail(product);
 }
 
-async function assertCategoryAndBrandExist(categoryId: string, brandId: string | null | undefined) {
+/** Only ever called for a category/brand the caller is actively assigning — never for an
+ *  untouched existing reference, so deactivating a category/brand never retroactively
+ *  breaks unrelated edits to products already classified under it. */
+async function assertCategoryExists(categoryId: string): Promise<void> {
   const category = await prisma.category.findUnique({ where: { id: categoryId } });
   if (!category) throw new ValidationError('Category not found');
-  if (brandId) {
-    const brand = await prisma.brand.findUnique({ where: { id: brandId } });
-    if (!brand) throw new ValidationError('Brand not found');
-  }
+  if (!category.isActive) throw new ValidationError('Category is inactive');
+}
+
+async function assertBrandExists(brandId: string): Promise<void> {
+  const brand = await prisma.brand.findUnique({ where: { id: brandId } });
+  if (!brand) throw new ValidationError('Brand not found');
+  if (!brand.isActive) throw new ValidationError('Brand is inactive');
 }
 
 export async function createProduct(actorId: string, input: CreateProductInput): Promise<AdminProductDetailDto> {
-  await assertCategoryAndBrandExist(input.categoryId, input.brandId);
+  await assertCategoryExists(input.categoryId);
+  if (input.brandId) await assertBrandExists(input.brandId);
 
   const existingSlug = await prisma.product.findUnique({ where: { slug: input.slug } });
   if (existingSlug) throw new ConflictError('A product with this slug already exists');
@@ -214,9 +221,8 @@ export async function updateProduct(
 ): Promise<AdminProductDetailDto> {
   const existing = await prisma.product.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError('Product not found');
-  if (input.categoryId !== undefined || input.brandId !== undefined) {
-    await assertCategoryAndBrandExist(input.categoryId ?? existing.categoryId, input.brandId);
-  }
+  if (input.categoryId !== undefined) await assertCategoryExists(input.categoryId);
+  if (input.brandId !== undefined && input.brandId !== null) await assertBrandExists(input.brandId);
 
   const updated = await prisma.$transaction(async (tx) => {
     const product = await tx.product.update({

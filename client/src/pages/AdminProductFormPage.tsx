@@ -3,13 +3,14 @@ import { useNavigate, useParams } from 'react-router-dom';
 import type { ZodError } from 'zod';
 import {
   ProductStatus,
-  adminBrandsResponseSchema,
-  adminCategoriesResponseSchema,
+  adminBrandListResponseSchema,
+  adminCategoryListResponseSchema,
   adminProductResponseSchema,
   createProductInputSchema,
   updateProductInputSchema,
   updateVariantInputSchema,
-  type AdminOptionDto,
+  type AdminBrandDto,
+  type AdminCategoryDto,
   type AdminProductDetailDto,
 } from '@audio-commerce/shared';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
@@ -45,8 +46,8 @@ export default function AdminProductFormPage() {
   const isEdit = Boolean(id);
   const navigate = useNavigate();
 
-  const [categories, setCategories] = useState<AdminOptionDto[] | null>(null);
-  const [brands, setBrands] = useState<AdminOptionDto[] | null>(null);
+  const [categories, setCategories] = useState<AdminCategoryDto[] | null>(null);
+  const [brands, setBrands] = useState<AdminBrandDto[] | null>(null);
   const [product, setProduct] = useState<AdminProductDetailDto | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
 
@@ -86,8 +87,8 @@ export default function AdminProductFormPage() {
           apiFetch('/api/admin/brands', { signal: ac.signal }),
         ]);
         if (cancelled) return;
-        setCategories(parseCatalog(adminCategoriesResponseSchema, categoriesData).categories);
-        setBrands(parseCatalog(adminBrandsResponseSchema, brandsData).brands);
+        setCategories(parseCatalog(adminCategoryListResponseSchema, categoriesData).categories);
+        setBrands(parseCatalog(adminBrandListResponseSchema, brandsData).brands);
 
         if (id) {
           const detailData = await apiFetch(`/api/admin/products/${id}`, { signal: ac.signal });
@@ -281,7 +282,7 @@ export default function AdminProductFormPage() {
               <option value="">Select a category</option>
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
-                  {category.name}
+                  {category.isActive ? category.name : `${category.name} (inactive)`}
                 </option>
               ))}
             </select>
@@ -304,7 +305,7 @@ export default function AdminProductFormPage() {
               <option value="">None</option>
               {brands.map((brand) => (
                 <option key={brand.id} value={brand.id}>
-                  {brand.name}
+                  {brand.isActive ? brand.name : `${brand.name} (inactive)`}
                 </option>
               ))}
             </select>

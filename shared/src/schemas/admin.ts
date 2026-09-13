@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { OrderStatus, ProductStatus } from '../enums.js';
-import { moneySchema, skuSchema, slugSchema, specsSchema, variantAttributesSchema } from './catalog.js';
+import { httpsUrlSchema, moneySchema, skuSchema, slugSchema, specsSchema, variantAttributesSchema } from './catalog.js';
 import { shippingAddressInputSchema } from './orders.js';
 
 export const paginationQuerySchema = z
@@ -209,16 +209,89 @@ export type AdminOrderResponse = z.infer<typeof adminOrderResponseSchema>;
 export const updateOrderStatusInputSchema = z.object({ status: z.nativeEnum(OrderStatus) }).strict();
 export type UpdateOrderStatusInput = z.infer<typeof updateOrderStatusInputSchema>;
 
-// ---- Lookups (for admin form dropdowns) ----
+// ---- Category management ----
 
-export const adminOptionDtoSchema = z.object({ id: z.string().uuid(), name: z.string() }).strict();
-export type AdminOptionDto = z.infer<typeof adminOptionDtoSchema>;
+export const createCategoryInputSchema = z
+  .object({
+    slug: slugSchema,
+    name: z.string().trim().min(1).max(100),
+    parentId: z.string().uuid().nullable().optional(),
+  })
+  .strict();
+export type CreateCategoryInput = z.infer<typeof createCategoryInputSchema>;
 
-export const adminCategoriesResponseSchema = z.object({ categories: z.array(adminOptionDtoSchema) }).strict();
-export type AdminCategoriesResponse = z.infer<typeof adminCategoriesResponseSchema>;
+export const updateCategoryInputSchema = z
+  .object({
+    slug: slugSchema.optional(),
+    name: z.string().trim().min(1).max(100).optional(),
+    parentId: z.string().uuid().nullable().optional(),
+    isActive: z.boolean().optional(),
+  })
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, { message: 'At least one field is required' });
+export type UpdateCategoryInput = z.infer<typeof updateCategoryInputSchema>;
 
-export const adminBrandsResponseSchema = z.object({ brands: z.array(adminOptionDtoSchema) }).strict();
-export type AdminBrandsResponse = z.infer<typeof adminBrandsResponseSchema>;
+export const adminCategoryDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    slug: slugSchema,
+    name: z.string(),
+    parentId: z.string().uuid().nullable(),
+    parentName: z.string().nullable(),
+    isActive: z.boolean(),
+    productCount: z.number().int(),
+    childCount: z.number().int(),
+    createdAt: z.string(),
+  })
+  .strict();
+export type AdminCategoryDto = z.infer<typeof adminCategoryDtoSchema>;
+
+export const adminCategoryListResponseSchema = z.object({ categories: z.array(adminCategoryDtoSchema) }).strict();
+export type AdminCategoryListResponse = z.infer<typeof adminCategoryListResponseSchema>;
+
+export const adminCategoryResponseSchema = z.object({ category: adminCategoryDtoSchema }).strict();
+export type AdminCategoryResponse = z.infer<typeof adminCategoryResponseSchema>;
+
+// ---- Brand management ----
+
+export const createBrandInputSchema = z
+  .object({
+    slug: slugSchema,
+    name: z.string().trim().min(1).max(100),
+    logoUrl: httpsUrlSchema.nullable().optional(),
+  })
+  .strict();
+export type CreateBrandInput = z.infer<typeof createBrandInputSchema>;
+
+export const updateBrandInputSchema = z
+  .object({
+    slug: slugSchema.optional(),
+    name: z.string().trim().min(1).max(100).optional(),
+    logoUrl: httpsUrlSchema.nullable().optional(),
+    isActive: z.boolean().optional(),
+  })
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, { message: 'At least one field is required' });
+export type UpdateBrandInput = z.infer<typeof updateBrandInputSchema>;
+
+export const adminBrandDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    slug: slugSchema,
+    name: z.string(),
+    logoUrl: z.string().nullable(),
+    isActive: z.boolean(),
+    productCount: z.number().int(),
+    createdAt: z.string(),
+  })
+  .strict();
+export type AdminBrandDto = z.infer<typeof adminBrandDtoSchema>;
+
+export const adminBrandListResponseSchema = z.object({ brands: z.array(adminBrandDtoSchema) }).strict();
+export type AdminBrandListResponse = z.infer<typeof adminBrandListResponseSchema>;
+
+export const adminBrandResponseSchema = z.object({ brand: adminBrandDtoSchema }).strict();
+export type AdminBrandResponse = z.infer<typeof adminBrandResponseSchema>;
 
 // ---- Dashboard ----
 

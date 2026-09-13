@@ -3,6 +3,8 @@ import { NavLink, Outlet } from 'react-router-dom';
 const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
   { to: '/admin', label: 'Dashboard', end: true },
   { to: '/admin/products', label: 'Products' },
+  { to: '/admin/categories', label: 'Categories' },
+  { to: '/admin/brands', label: 'Brands' },
   { to: '/admin/orders', label: 'Orders' },
   { to: '/admin/reviews', label: 'Reviews' },
 ];

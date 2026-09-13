@@ -27,4 +27,20 @@ describe('resolveCategoryAndDescendantIds', () => {
 
     await expect(resolveCategoryAndDescendantIds('missing')).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it('excludes inactive categories from both the anchor and the descendant walk', async () => {
+    const root = await prisma.category.create({ data: { slug: 'audio', name: 'Audio' } });
+    const activeChild = await prisma.category.create({
+      data: { slug: 'speakers', name: 'Speakers', parentId: root.id },
+    });
+    await prisma.category.create({
+      data: { slug: 'retired-child', name: 'Retired child', parentId: root.id, isActive: false },
+    });
+
+    const ids = await resolveCategoryAndDescendantIds('audio');
+    expect(ids.sort()).toEqual([root.id, activeChild.id].sort());
+
+    await prisma.category.update({ where: { id: root.id }, data: { isActive: false } });
+    await expect(resolveCategoryAndDescendantIds('audio')).rejects.toBeInstanceOf(NotFoundError);
+  });
 });
