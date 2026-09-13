@@ -16,6 +16,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "test": "npm run test -w shared && npm run test -w server && npm run test -w client",
+    "pretest:e2e": "npm run build -w shared",
     "test:e2e": "playwright test",
     "typecheck": "npm run build -w shared && npm run typecheck -w shared && npm run typecheck -w server && npm run typecheck -w client",
     "postinstall": "npm run prisma:generate -w server"
