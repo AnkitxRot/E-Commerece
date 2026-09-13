@@ -5,3 +5,4 @@ export * from './schemas/cart.js';
 export * from './schemas/wishlist.js';
 export * from './schemas/orders.js';
 export * from './schemas/admin.js';
+export * from './schemas/reviews.js';
