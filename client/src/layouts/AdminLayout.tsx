@@ -4,6 +4,7 @@ const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
   { to: '/admin', label: 'Dashboard', end: true },
   { to: '/admin/products', label: 'Products' },
   { to: '/admin/orders', label: 'Orders' },
+  { to: '/admin/reviews', label: 'Reviews' },
 ];
 
 export function AdminLayout() {
