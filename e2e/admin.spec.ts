@@ -70,3 +70,45 @@ test('admin can create a new product', async ({ page }) => {
   await expect(page).toHaveURL(/\/admin\/products$/);
   await expect(page.getByRole('link', { name: `E2E Test Speaker ${unique}` })).toBeVisible();
 });
+
+test('admin can create a category and a brand, use them on a product, then deactivate the category', async ({
+  page,
+}) => {
+  await loginAsAdmin(page);
+  const unique = Date.now();
+  const categoryName = `E2E Category ${unique}`;
+  const brandName = `E2E Brand ${unique}`;
+
+  await page.goto('/admin/categories');
+  await page.getByLabel('Name', { exact: true }).fill(categoryName);
+  await page.getByRole('button', { name: 'Create category' }).click();
+  await expect(page.getByText('Category created')).toBeVisible();
+  await expect(page.getByRole('cell', { name: categoryName })).toBeVisible();
+
+  await page.goto('/admin/brands');
+  await page.getByLabel('Name', { exact: true }).fill(brandName);
+  await page.getByRole('button', { name: 'Create brand' }).click();
+  await expect(page.getByText('Brand created')).toBeVisible();
+  await expect(page.getByRole('cell', { name: brandName })).toBeVisible();
+
+  await page.goto('/admin/products/new');
+  await page.getByLabel('Name', { exact: true }).fill(`E2E Category Product ${unique}`);
+  await page.getByLabel('Description').fill('A product created to exercise category/brand selection.');
+  await page.getByLabel('Category').selectOption({ label: categoryName });
+  await page.getByLabel('Brand (optional)').selectOption({ label: brandName });
+  await page.getByLabel('Base price (₹)').fill('2999.00');
+  await page.getByLabel('SKU').fill(`E2E-CAT-SKU-${unique}`);
+  await page.getByLabel('Stock quantity').fill('5');
+  await page.getByRole('button', { name: 'Create product' }).click();
+  await expect(page).toHaveURL(/\/admin\/products$/);
+  await expect(page.getByRole('link', { name: `E2E Category Product ${unique}` })).toBeVisible();
+
+  await page.goto('/admin/categories');
+  const row = page.getByRole('row').filter({ hasText: categoryName });
+  await row.getByRole('button', { name: 'Deactivate' }).click();
+  await expect(row.getByText('Inactive')).toBeVisible();
+
+  // The public storefront nav (built from the active-only category tree) no longer links to it.
+  await page.goto('/');
+  await expect(page.getByRole('link', { name: categoryName })).toHaveCount(0);
+});
