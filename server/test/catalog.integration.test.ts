@@ -311,7 +311,7 @@ describe('GET /api/catalog/products/:slug', () => {
     });
     const later = new Date('2026-02-01T00:00:00Z');
     const earlier = new Date('2026-01-01T00:00:00Z');
-    await prisma.productVariant.create({
+    const ovr = await prisma.productVariant.create({
       data: {
         productId: product.id,
         sku: 'LIN-OVR',
@@ -321,7 +321,7 @@ describe('GET /api/catalog/products/:slug', () => {
         createdAt: new Date('2026-03-01T00:00:00Z'),
       },
     });
-    await prisma.productVariant.create({
+    const slv = await prisma.productVariant.create({
       data: {
         productId: product.id,
         sku: 'LIN-SLV',
@@ -332,7 +332,7 @@ describe('GET /api/catalog/products/:slug', () => {
         createdAt: later,
       },
     });
-    await prisma.productVariant.create({
+    const blk = await prisma.productVariant.create({
       data: {
         productId: product.id,
         sku: 'LIN-BLK',
@@ -380,23 +380,29 @@ describe('GET /api/catalog/products/:slug', () => {
     expect(body.product.variants.map((v) => v.sku)).toEqual(['LIN-BLK', 'LIN-SLV', 'LIN-OVR']);
     expect(body.product.variants).toEqual([
       {
+        id: blk.id,
         sku: 'LIN-BLK',
         attributes: { color: 'black' },
         price: '100.00',
+        compareAtPrice: null,
         inStock: true,
         availableQty: 3,
       },
       {
+        id: slv.id,
         sku: 'LIN-SLV',
         attributes: { color: 'silver' },
         price: '120.00',
+        compareAtPrice: null,
         inStock: false,
         availableQty: 0,
       },
       {
+        id: ovr.id,
         sku: 'LIN-OVR',
         attributes: { color: 'red' },
         price: '100.00',
+        compareAtPrice: null,
         inStock: false,
         availableQty: 0,
       },
