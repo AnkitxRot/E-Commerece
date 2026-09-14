@@ -245,4 +245,25 @@ describe('default address', () => {
     const all = await prisma.address.findMany({ where: { userId: user.id } });
     expect(all).toHaveLength(3); // all three were still created, just not all default
   });
+
+  it('never surfaces a raw 500 when a delete races an update/set-default on the same address', async () => {
+    const token = await registerCustomer('def7@example.com');
+    for (let i = 0; i < 20; i++) {
+      const created = await request(app).post('/api/addresses').set('Authorization', `Bearer ${token}`).send(addressPayload());
+      const id = created.body.address.id;
+
+      const [updateRes, deleteRes] = await Promise.all([
+        request(app).patch(`/api/addresses/${id}`).set('Authorization', `Bearer ${token}`).send({ label: 'Raced' }),
+        request(app).delete(`/api/addresses/${id}`).set('Authorization', `Bearer ${token}`),
+      ]);
+
+      // Whichever order they actually resolve in, neither may ever be a 5xx —
+      // a delete winning the race must surface as a clean 404 to the update,
+      // not an unhandled Prisma "record not found" error.
+      expect(updateRes.status).toBeLessThan(500);
+      expect(deleteRes.status).toBeLessThan(500);
+      expect([200, 404]).toContain(updateRes.status);
+      expect([204, 404]).toContain(deleteRes.status);
+    }
+  });
 });

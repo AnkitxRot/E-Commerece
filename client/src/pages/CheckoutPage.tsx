@@ -56,6 +56,7 @@ export default function CheckoutPage() {
         setSavedAddresses(data.addresses);
         if (data.addresses.length > 0) setSelectedAddressId(data.addresses[0].id);
       } catch {
+        if (ac.signal.aborted) return; // unmounted/re-run, not a real failure
         // Saved addresses are a convenience, not a requirement — if this
         // fails, silently fall back to the manual-entry form that already
         // works without them, rather than blocking checkout entirely.
