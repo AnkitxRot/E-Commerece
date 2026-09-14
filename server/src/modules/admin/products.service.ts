@@ -258,18 +258,28 @@ export async function updateVariant(
   const variant = await prisma.productVariant.findFirst({ where: { id: variantId, productId } });
   if (!variant) throw new NotFoundError('Variant not found');
 
-  await prisma.$transaction(async (tx) => {
-    await tx.productVariant.update({
-      where: { id: variantId },
-      data: {
-        stockQty: input.stockQty,
-        lowStockThreshold: input.lowStockThreshold,
-        priceOverride: input.priceOverride,
-        compareAtPrice: input.compareAtPrice,
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.productVariant.update({
+        where: { id: variantId },
+        data: {
+          stockQty: input.stockQty,
+          lowStockThreshold: input.lowStockThreshold,
+          priceOverride: input.priceOverride,
+          compareAtPrice: input.compareAtPrice,
+        },
+      });
+      await recordAudit(actorId, 'product.variant.update', 'ProductVariant', variantId, input as Prisma.InputJsonValue, tx);
     });
-    await recordAudit(actorId, 'product.variant.update', 'ProductVariant', variantId, input as Prisma.InputJsonValue, tx);
-  });
+  } catch (err) {
+    // The variant was deleted by a concurrent request between the
+    // ownership check above and this update — report the same 404 as any
+    // other "doesn't exist" case instead of an uncaught 500.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+      throw new NotFoundError('Variant not found');
+    }
+    throw err;
+  }
 
   return getProductById(productId);
 }
@@ -319,33 +329,43 @@ export async function deleteVariant(actorId: string, productId: string, variantI
   const variant = await prisma.productVariant.findFirst({ where: { id: variantId, productId } });
   if (!variant) throw new NotFoundError('Variant not found');
 
-  await prisma.$transaction(async (tx) => {
-    // SELECT ... FOR UPDATE locks every one of this product's variant rows
-    // for the rest of this transaction. A concurrent delete of a SIBLING
-    // variant, running the same lock query, blocks here until this
-    // transaction commits or rolls back — so two concurrent deletes can
-    // never both see "2 variants left" and both proceed, unlike a plain
-    // count() read outside a lock would allow. Once unblocked, the second
-    // transaction re-evaluates against the now-current state and correctly
-    // hits the ConflictError below.
-    const locked = await tx.$queryRaw<
-      { id: string }[]
-    >`SELECT id FROM "ProductVariant" WHERE "productId" = ${productId} FOR UPDATE`;
-    if (locked.length <= 1) {
-      throw new ConflictError("Cannot delete a product's last remaining variant — every product needs at least one.");
-    }
+  try {
+    await prisma.$transaction(async (tx) => {
+      // SELECT ... FOR UPDATE locks every one of this product's variant rows
+      // for the rest of this transaction. A concurrent delete of a SIBLING
+      // variant, running the same lock query, blocks here until this
+      // transaction commits or rolls back — so two concurrent deletes can
+      // never both see "2 variants left" and both proceed, unlike a plain
+      // count() read outside a lock would allow. Once unblocked, the second
+      // transaction re-evaluates against the now-current state and correctly
+      // hits the ConflictError below. (A concurrent delete of the SAME
+      // variantId is handled by the catch below instead — P2025 on the
+      // actual delete, since the pre-transaction existence check above
+      // can't see a deletion that lost this same race.)
+      const locked = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM "ProductVariant" WHERE "productId" = ${productId} FOR UPDATE`;
+      if (locked.length <= 1) {
+        throw new ConflictError("Cannot delete a product's last remaining variant — every product needs at least one.");
+      }
 
-    // Discontinuing a variant removes it from any customer's in-progress
-    // cart too (CartItem.variantId is ON DELETE RESTRICT, so this delete
-    // would otherwise fail outright while anyone has it in their cart). A
-    // cart is ephemeral customer state, not a durable record the way an
-    // order is: OrderItem snapshots variantSku/variantAttributes as plain
-    // values, never a live reference, so past orders are never touched by
-    // this — see orders.service.ts's itemsData mapping.
-    await tx.cartItem.deleteMany({ where: { variantId } });
-    await tx.productVariant.delete({ where: { id: variantId } });
-    await recordAudit(actorId, 'product.variant.delete', 'ProductVariant', variantId, { sku: variant.sku, productId }, tx);
-  });
+      // Discontinuing a variant removes it from any customer's in-progress
+      // cart too (CartItem.variantId is ON DELETE RESTRICT, so this delete
+      // would otherwise fail outright while anyone has it in their cart). A
+      // cart is ephemeral customer state, not a durable record the way an
+      // order is: OrderItem snapshots variantSku/variantAttributes as plain
+      // values, never a live reference, so past orders are never touched by
+      // this — see orders.service.ts's itemsData mapping.
+      await tx.cartItem.deleteMany({ where: { variantId } });
+      await tx.productVariant.delete({ where: { id: variantId } });
+      await recordAudit(actorId, 'product.variant.delete', 'ProductVariant', variantId, { sku: variant.sku, productId }, tx);
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+      throw new NotFoundError('Variant not found');
+    }
+    throw err;
+  }
 
   return getProductById(productId);
 }

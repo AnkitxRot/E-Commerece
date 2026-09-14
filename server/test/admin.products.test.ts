@@ -312,4 +312,70 @@ describe('admin products', () => {
     const remaining = await prisma.productVariant.findMany({ where: { productId } });
     expect(remaining).toHaveLength(1);
   });
+
+  it('never surfaces a raw 500 when a delete races an update on the same variant', async () => {
+    const token = await registerAdmin('prod-admin11@example.com');
+    const category = await createTestCategory();
+    for (let i = 0; i < 10; i++) {
+      const createRes = await request(app)
+        .post('/api/admin/products')
+        .set('Authorization', `Bearer ${token}`)
+        .send(productPayload(category.id));
+      const productId = createRes.body.product.id;
+      const firstVariantId = createRes.body.product.variants[0].id;
+      await request(app)
+        .post(`/api/admin/products/${productId}/variants`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ sku: `RACE-${Date.now()}-${i}`, attributes: {}, stockQty: 5, lowStockThreshold: 2 });
+
+      const [updateRes, deleteRes] = await Promise.all([
+        request(app)
+          .patch(`/api/admin/products/${productId}/variants/${firstVariantId}`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ stockQty: 7 }),
+        request(app)
+          .delete(`/api/admin/products/${productId}/variants/${firstVariantId}`)
+          .set('Authorization', `Bearer ${token}`),
+      ]);
+
+      expect(updateRes.status).toBeLessThan(500);
+      expect(deleteRes.status).toBeLessThan(500);
+      expect([200, 404]).toContain(updateRes.status);
+      expect([200, 404, 409]).toContain(deleteRes.status);
+    }
+  });
+
+  it('never surfaces a raw 500 when two concurrent requests delete the same variant', async () => {
+    const token = await registerAdmin('prod-admin12@example.com');
+    const category = await createTestCategory();
+    for (let i = 0; i < 10; i++) {
+      const createRes = await request(app)
+        .post('/api/admin/products')
+        .set('Authorization', `Bearer ${token}`)
+        .send(productPayload(category.id));
+      const productId = createRes.body.product.id;
+      const firstVariantId = createRes.body.product.variants[0].id;
+      // Two more variants (3 total) so that after ONE concurrent delete of
+      // firstVariantId succeeds, 2 still remain — keeping the "last
+      // remaining variant" guard out of play, so this test isolates the
+      // same-id delete/delete race specifically (not last-variant 409s).
+      for (let j = 0; j < 2; j++) {
+        await request(app)
+          .post(`/api/admin/products/${productId}/variants`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({ sku: `RACE2-${Date.now()}-${i}-${j}`, attributes: {}, stockQty: 5, lowStockThreshold: 2 });
+      }
+
+      const [resA, resB] = await Promise.all([
+        request(app).delete(`/api/admin/products/${productId}/variants/${firstVariantId}`).set('Authorization', `Bearer ${token}`),
+        request(app).delete(`/api/admin/products/${productId}/variants/${firstVariantId}`).set('Authorization', `Bearer ${token}`),
+      ]);
+
+      expect(resA.status).toBeLessThan(500);
+      expect(resB.status).toBeLessThan(500);
+      const statuses = [resA.status, resB.status].sort();
+      expect(statuses).toEqual([200, 404]);
+      expect(await prisma.productVariant.findUnique({ where: { id: firstVariantId } })).toBeNull();
+    }
+  });
 });
