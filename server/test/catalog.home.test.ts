@@ -150,6 +150,34 @@ describe('GET /api/catalog/home', () => {
     );
   });
 
+  it('preserves position order across multiple FEATURED_COLLECTION blocks resolved concurrently', async () => {
+    // Each FEATURED_COLLECTION block runs its own product query; getHome resolves
+    // them concurrently rather than one-by-one. This pins down that concurrent
+    // resolution still returns blocks in stored position order, not resolution order.
+    await upsertSettings({});
+    await seedHomeProducts();
+    const second = await prisma.contentBlock.create({
+      data: { type: 'FEATURED_COLLECTION', position: 1, active: true, payload: { title: 'Second', productSlugs: ['beta'] } },
+    });
+    const first = await prisma.contentBlock.create({
+      data: { type: 'FEATURED_COLLECTION', position: 0, active: true, payload: { title: 'First', productSlugs: ['alpha'] } },
+    });
+    const third = await prisma.contentBlock.create({
+      data: {
+        type: 'FEATURED_COLLECTION',
+        position: 2,
+        active: true,
+        payload: { title: 'Third', productSlugs: ['alpha', 'beta'] },
+      },
+    });
+
+    const res = await request(app).get('/api/catalog/home');
+    expect(res.status).toBe(200);
+    const body = homeResponseSchema.parse(res.body);
+    expect(body.blocks.map((b) => b.id)).toEqual([first.id, second.id, third.id]);
+    expect(body.blocks.every((b) => b.type === ContentBlockType.FEATURED_COLLECTION)).toBe(true);
+  });
+
   it('omits a block with an invalid payload and keeps a valid sibling', async () => {
     await upsertSettings({});
     await seedHomeProducts();

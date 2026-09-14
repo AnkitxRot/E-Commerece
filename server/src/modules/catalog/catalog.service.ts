@@ -180,11 +180,12 @@ export async function getHome(): Promise<HomeResponse> {
   ]);
 
   const heroParsed = heroContentSchema.safeParse(settings?.heroContent);
-  const mapped: HomeBlockDto[] = [];
-  for (const block of blocks) {
-    const dto = await mapHomeBlock(block);
-    if (dto) mapped.push(dto);
-  }
+  // Each FEATURED_COLLECTION block issues its own product query (BANNER/ANNOUNCEMENT
+  // are pure payload parses) — resolve all blocks concurrently rather than one
+  // sequential DB round-trip per block. Promise.all preserves `blocks`' order
+  // (already sorted by position above), so this changes nothing but latency.
+  const mappedBlocks = await Promise.all(blocks.map((block) => mapHomeBlock(block)));
+  const mapped: HomeBlockDto[] = mappedBlocks.filter((dto): dto is HomeBlockDto => dto !== null);
 
   const categories: HomeCategoryTileDto[] = topCategories.map((category) => {
     const image = category.products[0]?.images[0];
