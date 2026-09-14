@@ -18,6 +18,7 @@ const AdminBrandsPage = lazy(() => import('./pages/AdminBrandsPage.js'));
 const AdminOrdersPage = lazy(() => import('./pages/AdminOrdersPage.js'));
 const AdminOrderDetailPage = lazy(() => import('./pages/AdminOrderDetailPage.js'));
 const AdminReviewsPage = lazy(() => import('./pages/AdminReviewsPage.js'));
+const AdminSettingsPage = lazy(() => import('./pages/AdminSettingsPage.js'));
 const ProductListPage = lazy(() => import('./pages/ProductListPage.js'));
 const ProductDetailPage = lazy(() => import('./pages/ProductDetailPage.js'));
 const HomePage = lazy(() => import('./pages/HomePage.js'));
@@ -61,6 +62,7 @@ export default function App() {
               <Route path="admin/orders" element={<AdminOrdersPage />} />
               <Route path="admin/orders/:id" element={<AdminOrderDetailPage />} />
               <Route path="admin/reviews" element={<AdminReviewsPage />} />
+              <Route path="admin/settings" element={<AdminSettingsPage />} />
             </Route>
           </Route>
         </Route>
