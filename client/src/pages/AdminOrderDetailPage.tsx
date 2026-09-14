@@ -7,6 +7,7 @@ import { Button } from '../components/Button.js';
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 
@@ -30,6 +31,8 @@ export default function AdminOrderDetailPage() {
   const [nextStatus, setNextStatus] = useState('');
   const [updating, setUpdating] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  useDocumentTitle(order ? `Order ${order.id.slice(0, 8)}` : 'Order');
 
   useEffect(() => {
     const ac = new AbortController();

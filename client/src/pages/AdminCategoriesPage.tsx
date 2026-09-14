@@ -14,6 +14,7 @@ import { Input } from '../components/Input.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 function slugify(value: string): string {
   return value
@@ -24,6 +25,7 @@ function slugify(value: string): string {
 }
 
 export default function AdminCategoriesPage() {
+  useDocumentTitle('Categories');
   const [categories, setCategories] = useState<AdminCategoryDto[] | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [retryKey, setRetryKey] = useState(0);

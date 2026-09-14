@@ -12,6 +12,12 @@ const NAV_ITEMS: { to: string; label: string; end?: boolean }[] = [
 export function AdminLayout() {
   return (
     <div className="flex min-h-screen flex-col sm:flex-row">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2"
+      >
+        Skip to content
+      </a>
       <aside className="w-full shrink-0 border-b border-border p-4 sm:w-56 sm:border-b-0 sm:border-r">
         <p className="mb-4 text-sm font-semibold uppercase tracking-wide text-ink-muted">Admin</p>
         <nav className="flex gap-2 overflow-x-auto sm:flex-col sm:overflow-visible">
@@ -31,7 +37,7 @@ export function AdminLayout() {
           ))}
         </nav>
       </aside>
-      <main className="flex-1 p-4 sm:p-6">
+      <main id="main-content" className="flex-1 p-4 sm:p-6">
         <Outlet />
       </main>
     </div>

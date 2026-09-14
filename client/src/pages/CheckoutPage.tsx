@@ -9,6 +9,7 @@ import { Input } from '../components/Input.js';
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 const FREE_SHIPPING_THRESHOLD = 999;
@@ -26,6 +27,7 @@ const EMPTY_ADDRESS: ShippingAddressInput = {
 };
 
 export default function CheckoutPage() {
+  useDocumentTitle('Checkout');
   const { cart, loading, error, refresh } = useCart();
   const navigate = useNavigate();
   const [address, setAddress] = useState<ShippingAddressInput>(EMPTY_ADDRESS);

@@ -4,8 +4,10 @@ import { registerSchema } from '@audio-commerce/shared';
 import { useAuth } from '../context/AuthContext.js';
 import { Button } from '../components/Button.js';
 import { Input } from '../components/Input.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 export default function RegisterPage() {
+  useDocumentTitle('Create account');
   const { register } = useAuth();
   const navigate = useNavigate();
   const [name, setName] = useState('');

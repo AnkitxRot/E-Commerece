@@ -13,11 +13,13 @@ import { Button } from '../components/Button.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const PAGE_SIZE = 20;
 const STATUS_OPTIONS = Object.values(ReviewStatus);
 
 export default function AdminReviewsPage() {
+  useDocumentTitle('Reviews');
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Number(searchParams.get('page') ?? '1');
   const status = searchParams.get('status') ?? ReviewStatus.PENDING;

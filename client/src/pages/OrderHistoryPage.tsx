@@ -7,10 +7,12 @@ import { Breadcrumbs } from '../components/Breadcrumbs.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 
 export default function OrderHistoryPage() {
+  useDocumentTitle('Order history');
   const [orders, setOrders] = useState<OrderDto[] | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [retryKey, setRetryKey] = useState(0);

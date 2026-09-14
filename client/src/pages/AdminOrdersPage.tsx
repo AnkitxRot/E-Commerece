@@ -7,12 +7,14 @@ import { Button } from '../components/Button.js';
 import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 const PAGE_SIZE = 20;
 const STATUS_OPTIONS = Object.values(OrderStatus);
 
 export default function AdminOrdersPage() {
+  useDocumentTitle('Orders');
   const [searchParams, setSearchParams] = useSearchParams();
   const page = Number(searchParams.get('page') ?? '1');
   const status = searchParams.get('status') ?? '';

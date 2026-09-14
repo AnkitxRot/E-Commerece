@@ -1,7 +1,9 @@
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
 import { IMAGE_CREDITS } from '../data/imageCredits.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 export default function ImageCreditsPage() {
+  useDocumentTitle('Image credits');
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
       <Breadcrumbs items={[{ label: 'Image credits' }]} />

@@ -10,6 +10,7 @@ import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 const FREE_SHIPPING_THRESHOLD = 999;
@@ -87,6 +88,7 @@ function CartLine({ item }: { item: CartItemDto }) {
 }
 
 export default function CartPage() {
+  useDocumentTitle('Your cart');
   const { cart, loading, error, refresh } = useCart();
   const navigate = useNavigate();
 

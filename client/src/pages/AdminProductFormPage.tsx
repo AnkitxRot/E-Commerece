@@ -19,6 +19,7 @@ import { Button } from '../components/Button.js';
 import { Input } from '../components/Input.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 type AttributeRow = { key: string; value: string };
 
@@ -50,6 +51,8 @@ export default function AdminProductFormPage() {
   const [brands, setBrands] = useState<AdminBrandDto[] | null>(null);
   const [product, setProduct] = useState<AdminProductDetailDto | null>(null);
   const [loadError, setLoadError] = useState<Error | null>(null);
+
+  useDocumentTitle(isEdit ? (product ? `Edit ${product.name}` : 'Edit product') : 'New product');
 
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');

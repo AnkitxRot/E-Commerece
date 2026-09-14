@@ -1,9 +1,11 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.js';
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 export default function AccountPage() {
   const { user } = useAuth();
+  useDocumentTitle('Account');
   return (
     <div className="mx-auto max-w-2xl px-4 py-6 sm:px-6 sm:py-8">
       <Breadcrumbs items={[{ label: 'Account' }]} />

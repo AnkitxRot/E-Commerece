@@ -6,8 +6,10 @@ import { EmptyState } from '../components/EmptyState.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
 import { ProductGrid } from '../components/catalog/ProductGrid.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 export default function WishlistPage() {
+  useDocumentTitle('Your wishlist');
   const { wishlist, loading, error, refresh } = useWishlist();
 
   return (

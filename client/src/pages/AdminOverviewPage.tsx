@@ -5,10 +5,12 @@ import { apiFetch } from '../lib/apiClient.js';
 import { parseCatalog } from '../lib/parseCatalog.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 
 export default function AdminOverviewPage() {
+  useDocumentTitle('Dashboard');
   const [data, setData] = useState<AdminDashboardDto | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [retryKey, setRetryKey] = useState(0);

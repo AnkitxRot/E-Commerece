@@ -6,6 +6,7 @@ import { parseCatalog } from '../lib/parseCatalog.js';
 import { Breadcrumbs } from '../components/Breadcrumbs.js';
 import { ErrorState } from '../components/ErrorState.js';
 import { Skeleton } from '../components/Skeleton.js';
+import { useDocumentTitle } from '../hooks/useDocumentTitle.js';
 
 const inr = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' });
 
@@ -23,6 +24,7 @@ export default function OrderDetailPage() {
   const { orderId } = useParams<{ orderId: string }>();
   const [searchParams] = useSearchParams();
   const confirmed = searchParams.get('confirmed') === '1';
+  useDocumentTitle(confirmed ? 'Order confirmed' : 'Order details');
   const [order, setOrder] = useState<OrderDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
