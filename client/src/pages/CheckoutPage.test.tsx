@@ -130,6 +130,10 @@ describe('CheckoutPage', () => {
       '/api/orders',
       expect.objectContaining({ method: 'POST' }),
     );
+    const [, options] = vi.mocked(apiFetch).mock.calls[0];
+    const sentBody = JSON.parse((options as RequestInit).body as string);
+    expect(typeof sentBody.idempotencyKey).toBe('string');
+    expect(sentBody.idempotencyKey.length).toBeGreaterThan(0);
   });
 
   it('applies a coupon, shows the discount, and includes the code when placing the order', async () => {

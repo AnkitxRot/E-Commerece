@@ -249,6 +249,16 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
+  // Idempotency: a client-supplied key (e.g. from a checkout retry after a
+  // dropped response) that guarantees at most one order per (user, key).
+  // Null for the common case of no key supplied — Postgres treats distinct
+  // NULLs as non-equal, so unkeyed orders never collide with each other.
+  // requestHash detects a key being reused for a materially different
+  // request (different address/coupon) rather than a genuine retry.
+  idempotencyKey         String?
+  idempotencyRequestHash String?
+
+  @@unique([userId, idempotencyKey])
   @@index([userId])
   @@index([status])
   @@index([createdAt])

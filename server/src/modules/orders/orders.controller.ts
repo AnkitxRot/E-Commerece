@@ -3,8 +3,8 @@ import type { CreateOrderInput } from '@audio-commerce/shared';
 import * as ordersService from './orders.service.js';
 
 export async function createOrderHandler(req: Request, res: Response) {
-  const { shippingAddress, couponCode } = req.body as CreateOrderInput;
-  const order = await ordersService.createOrder(req.user!.id, shippingAddress, couponCode);
+  const { shippingAddress, couponCode, idempotencyKey } = req.body as CreateOrderInput;
+  const order = await ordersService.createOrder(req.user!.id, shippingAddress, couponCode, idempotencyKey);
   res.status(201).json({ order });
 }
 

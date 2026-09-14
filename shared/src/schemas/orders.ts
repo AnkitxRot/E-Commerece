@@ -17,10 +17,15 @@ export const shippingAddressInputSchema = z
   .strict();
 export type ShippingAddressInput = z.infer<typeof shippingAddressInputSchema>;
 
+// Lets a client safely retry a checkout submission (e.g. after a dropped
+// response) without risking a duplicate order — see orders.service.ts.
+export const idempotencyKeySchema = z.string().trim().min(1).max(100);
+
 export const createOrderInputSchema = z
   .object({
     shippingAddress: shippingAddressInputSchema,
     couponCode: couponCodeSchema.optional(),
+    idempotencyKey: idempotencyKeySchema.optional(),
   })
   .strict();
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;

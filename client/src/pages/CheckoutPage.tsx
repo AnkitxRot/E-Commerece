@@ -42,6 +42,11 @@ export default function CheckoutPage() {
   const [appliedCoupon, setAppliedCoupon] = useState<CouponPreviewDto | null>(null);
   const [couponError, setCouponError] = useState<string | null>(null);
   const [applyingCoupon, setApplyingCoupon] = useState(false);
+  // Generated once per page load and reused across every submit attempt on
+  // this page (including a resubmit after a failed attempt, or a double
+  // click before the button disables) so the server can recognize retries
+  // of the same checkout and never create a duplicate order.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
 
   function set<K extends keyof ShippingAddressInput>(key: K, value: string) {
     setAddress((prev) => ({ ...prev, [key]: value }));
@@ -99,6 +104,7 @@ export default function CheckoutPage() {
           method: 'POST',
           body: JSON.stringify({
             shippingAddress: result.data,
+            idempotencyKey,
             ...(appliedCoupon ? { couponCode: appliedCoupon.code } : {}),
           }),
         }),
