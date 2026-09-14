@@ -36,6 +36,7 @@ describe('OrderHistoryPage', () => {
           currency: 'INR',
           subtotal: '500.00',
           discountTotal: '0.00',
+          couponCode: null,
           shippingTotal: '79.00',
           taxTotal: '0.00',
           grandTotal: '579.00',

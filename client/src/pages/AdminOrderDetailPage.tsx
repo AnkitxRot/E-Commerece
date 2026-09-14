@@ -192,6 +192,12 @@ export default function AdminOrderDetailPage() {
               <dt className="text-ink-muted">Shipping</dt>
               <dd className="text-ink">{inr.format(Number(order.shippingTotal))}</dd>
             </div>
+            {order.couponCode ? (
+              <div className="flex justify-between">
+                <dt className="text-ink-muted">Coupon ({order.couponCode})</dt>
+                <dd className="text-success">−{inr.format(Number(order.discountTotal))}</dd>
+              </div>
+            ) : null}
             <div className="flex justify-between border-t border-border pt-1 font-medium">
               <dt className="text-ink">Total</dt>
               <dd className="text-ink">{inr.format(Number(order.grandTotal))}</dd>

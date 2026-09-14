@@ -101,6 +101,7 @@ describe('CheckoutPage', () => {
         currency: 'INR',
         subtotal: '500.00',
         discountTotal: '0.00',
+        couponCode: null,
         shippingTotal: '79.00',
         taxTotal: '0.00',
         grandTotal: '579.00',
@@ -129,6 +130,71 @@ describe('CheckoutPage', () => {
       '/api/orders',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('applies a coupon, shows the discount, and includes the code when placing the order', async () => {
+    mockCart(cartWithItem);
+    vi.mocked(apiFetch).mockImplementation((path: string, options?: RequestInit) => {
+      if (path === '/api/coupons/validate') {
+        return Promise.resolve({ coupon: { code: 'SAVE50', type: 'FIXED', value: '50.00', discountAmount: '50.00' } });
+      }
+      if (path === '/api/orders') {
+        expect(JSON.parse(options!.body as string)).toMatchObject({ couponCode: 'SAVE50' });
+        return Promise.resolve({
+          order: {
+            id: '77777777-7777-4777-8777-777777777777',
+            status: 'CONFIRMED',
+            currency: 'INR',
+            subtotal: '500.00',
+            discountTotal: '50.00',
+            couponCode: 'SAVE50',
+            shippingTotal: '79.00',
+            taxTotal: '0.00',
+            grandTotal: '529.00',
+            shippingAddress: {
+              fullName: 'Priya Sharma',
+              line1: '221B Baker Street',
+              city: 'Mumbai',
+              state: 'Maharashtra',
+              postalCode: '400001',
+              country: 'India',
+              phone: '9876543210',
+            },
+            items: [],
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        });
+      }
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+    renderCheckout();
+
+    await fillAddress();
+    await userEvent.type(screen.getByLabelText('Coupon code'), 'SAVE50');
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    await screen.findByText('SAVE50');
+    expect(screen.getByText((_, element) => element?.textContent === 'Coupon SAVE50 applied')).toBeInTheDocument();
+    expect(screen.getByText('Discount')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Place order' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('order-page-77777777-7777-4777-8777-777777777777-confirmed=1')).toBeInTheDocument();
+    });
+  });
+
+  it('shows an error and does not apply the coupon when validation fails', async () => {
+    mockCart(cartWithItem);
+    const { ApiError } = await import('../lib/apiClient.js');
+    vi.mocked(apiFetch).mockRejectedValue(new ApiError(404, 'NOT_FOUND', 'This coupon code is not valid.'));
+    renderCheckout();
+
+    await userEvent.type(screen.getByLabelText('Coupon code'), 'BOGUS');
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }));
+
+    expect(await screen.findByText('This coupon code is not valid.')).toBeInTheDocument();
+    expect(screen.queryByText('Discount')).not.toBeInTheDocument();
   });
 
   it('shows a server error message without navigating on failure', async () => {

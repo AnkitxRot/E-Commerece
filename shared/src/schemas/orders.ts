@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { moneySchema, skuSchema, slugSchema, variantAttributesSchema } from './catalog.js';
+import { couponCodeSchema } from './coupons.js';
 import { OrderStatus } from '../enums.js';
 
 export const shippingAddressInputSchema = z
@@ -19,6 +20,7 @@ export type ShippingAddressInput = z.infer<typeof shippingAddressInputSchema>;
 export const createOrderInputSchema = z
   .object({
     shippingAddress: shippingAddressInputSchema,
+    couponCode: couponCodeSchema.optional(),
   })
   .strict();
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
@@ -47,6 +49,7 @@ export const orderDtoSchema = z
     shippingTotal: moneySchema,
     taxTotal: moneySchema,
     grandTotal: moneySchema,
+    couponCode: z.string().nullable(),
     shippingAddress: shippingAddressInputSchema,
     items: z.array(orderItemDtoSchema),
     createdAt: z.string(),

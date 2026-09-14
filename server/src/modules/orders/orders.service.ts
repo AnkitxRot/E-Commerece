@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { decrementStock } from '../inventory/inventory.service.js';
 import { toMoney } from '../catalog/money.js';
+import { calculateDiscount } from '../coupons/coupons.service.js';
 
 const FREE_SHIPPING_THRESHOLD = new Decimal('999.00');
 const FLAT_SHIPPING_FEE = new Decimal('79.00');
@@ -19,6 +20,7 @@ type OrderRow = {
   shippingTotal: Prisma.Decimal;
   taxTotal: Prisma.Decimal;
   grandTotal: Prisma.Decimal;
+  couponCode: string | null;
   shippingAddress: Prisma.JsonValue;
   createdAt: Date;
   items: {
@@ -44,6 +46,7 @@ function toOrderDto(order: OrderRow): OrderDto {
     shippingTotal: toMoney(order.shippingTotal),
     taxTotal: toMoney(order.taxTotal),
     grandTotal: toMoney(order.grandTotal),
+    couponCode: order.couponCode,
     shippingAddress: order.shippingAddress as ShippingAddressInput,
     items: order.items.map((item) => ({
       id: item.id,
@@ -63,7 +66,11 @@ const orderInclude = {
   items: { include: { product: { select: { slug: true } } }, orderBy: [{ createdAt: 'asc' as const }] },
 };
 
-export async function createOrder(userId: string, shippingAddress: ShippingAddressInput): Promise<OrderDto> {
+export async function createOrder(
+  userId: string,
+  shippingAddress: ShippingAddressInput,
+  couponCode?: string,
+): Promise<OrderDto> {
   const order = await prisma.$transaction(async (tx) => {
     const cart = await tx.cart.findUnique({
       where: { userId },
@@ -108,7 +115,33 @@ export async function createOrder(userId: string, shippingAddress: ShippingAddre
 
     const shippingTotal = subtotal.gte(FREE_SHIPPING_THRESHOLD) || subtotal.eq(0) ? new Decimal(0) : FLAT_SHIPPING_FEE;
     const taxTotal = new Decimal(0);
-    const discountTotal = new Decimal(0);
+
+    // Re-validate and apply the coupon from scratch here, inside the same
+    // transaction as the stock reservation above — never trust a client's
+    // discount amount, and never trust an earlier preview call, since the
+    // coupon's state (or the cart) may have changed since then. The
+    // usage-limit check is an atomic conditional update, the same pattern
+    // decrementStock uses for stock: it re-reads timesUsed under the row
+    // lock, so a concurrent request racing the same coupon toward its limit
+    // can never both succeed.
+    let discountTotal = new Decimal(0);
+    let appliedCouponCode: string | null = null;
+    if (couponCode) {
+      const coupon = await tx.coupon.findUnique({ where: { code: couponCode } });
+      if (!coupon || !coupon.active) throw new ValidationError('This coupon code is not valid.');
+      if (coupon.expiresAt.getTime() <= Date.now()) throw new ValidationError('This coupon has expired.');
+
+      const usageGuard =
+        coupon.usageLimit === null
+          ? { id: coupon.id }
+          : { id: coupon.id, timesUsed: { lt: coupon.usageLimit } };
+      const result = await tx.coupon.updateMany({ where: usageGuard, data: { timesUsed: { increment: 1 } } });
+      if (result.count === 0) throw new ConflictError('This coupon has reached its usage limit.');
+
+      discountTotal = calculateDiscount(subtotal, coupon);
+      appliedCouponCode = coupon.code;
+    }
+
     const grandTotal = subtotal.plus(shippingTotal).plus(taxTotal).minus(discountTotal);
 
     const created = await tx.order.create({
@@ -121,6 +154,7 @@ export async function createOrder(userId: string, shippingAddress: ShippingAddre
         shippingTotal,
         taxTotal,
         grandTotal,
+        couponCode: appliedCouponCode,
         shippingAddress: shippingAddress as unknown as Prisma.InputJsonValue,
         items: { create: itemsData },
       },

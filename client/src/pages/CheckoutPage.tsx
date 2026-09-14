@@ -1,6 +1,12 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { orderResponseSchema, shippingAddressInputSchema, type ShippingAddressInput } from '@audio-commerce/shared';
+import {
+  couponPreviewResponseSchema,
+  orderResponseSchema,
+  shippingAddressInputSchema,
+  type CouponPreviewDto,
+  type ShippingAddressInput,
+} from '@audio-commerce/shared';
 import { useCart } from '../context/CartContext.js';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
 import { parseCatalog } from '../lib/parseCatalog.js';
@@ -32,9 +38,40 @@ export default function CheckoutPage() {
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof ShippingAddressInput, string>>>({});
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<CouponPreviewDto | null>(null);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
 
   function set<K extends keyof ShippingAddressInput>(key: K, value: string) {
     setAddress((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleApplyCoupon() {
+    if (!couponInput.trim()) return;
+    setApplyingCoupon(true);
+    setCouponError(null);
+    try {
+      const data = parseCatalog(
+        couponPreviewResponseSchema,
+        await apiFetch('/api/coupons/validate', {
+          method: 'POST',
+          body: JSON.stringify({ code: couponInput.trim() }),
+        }),
+      );
+      setAppliedCoupon(data.coupon);
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponError(err instanceof ApiError ? err.message : 'Unable to apply this coupon right now.');
+    } finally {
+      setApplyingCoupon(false);
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null);
+    setCouponError(null);
+    setCouponInput('');
   }
 
   async function handleSubmit(event: FormEvent) {
@@ -60,7 +97,10 @@ export default function CheckoutPage() {
         orderResponseSchema,
         await apiFetch('/api/orders', {
           method: 'POST',
-          body: JSON.stringify({ shippingAddress: result.data }),
+          body: JSON.stringify({
+            shippingAddress: result.data,
+            ...(appliedCoupon ? { couponCode: appliedCoupon.code } : {}),
+          }),
         }),
       );
       navigate(`/orders/${data.order.id}?confirmed=1`);
@@ -95,7 +135,8 @@ export default function CheckoutPage() {
 
   const subtotal = Number(cart.subtotal);
   const shipping = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : FLAT_SHIPPING_FEE;
-  const total = subtotal + shipping;
+  const discount = appliedCoupon ? Number(appliedCoupon.discountAmount) : 0;
+  const total = subtotal + shipping - discount;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
@@ -193,6 +234,39 @@ export default function CheckoutPage() {
               </li>
             ))}
           </ul>
+
+          <div className="mt-4 border-t border-border pt-3">
+            {appliedCoupon ? (
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-ink">
+                  Coupon <span className="font-medium">{appliedCoupon.code}</span> applied
+                </span>
+                <button type="button" onClick={handleRemoveCoupon} className="text-ink-muted underline">
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Input
+                  id="couponCode"
+                  label="Coupon code"
+                  value={couponInput}
+                  onChange={(e) => setCouponInput(e.target.value)}
+                  error={couponError ?? undefined}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="mt-6 h-fit"
+                  loading={applyingCoupon}
+                  onClick={() => void handleApplyCoupon()}
+                >
+                  Apply
+                </Button>
+              </div>
+            )}
+          </div>
+
           <dl className="mt-4 flex flex-col gap-2 border-t border-border pt-3 text-sm">
             <div className="flex justify-between">
               <dt className="text-ink-muted">Subtotal</dt>
@@ -202,6 +276,12 @@ export default function CheckoutPage() {
               <dt className="text-ink-muted">Shipping</dt>
               <dd className="text-ink">{shipping === 0 ? 'Free' : inr.format(shipping)}</dd>
             </div>
+            {appliedCoupon ? (
+              <div className="flex justify-between">
+                <dt className="text-ink-muted">Discount</dt>
+                <dd className="text-success">−{inr.format(discount)}</dd>
+              </div>
+            ) : null}
             <div className="mt-1 flex justify-between border-t border-border pt-2 text-base font-medium">
               <dt className="text-ink">Total</dt>
               <dd className="text-ink">{inr.format(total)}</dd>

@@ -195,6 +195,7 @@ export const adminOrderDetailDtoSchema = z
     shippingTotal: moneySchema,
     taxTotal: moneySchema,
     grandTotal: moneySchema,
+    couponCode: z.string().nullable(),
     shippingAddress: shippingAddressInputSchema,
     customer: z.object({ id: z.string().uuid(), email: z.string().email(), name: z.string() }),
     items: z.array(adminOrderItemDtoSchema),

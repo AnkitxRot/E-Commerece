@@ -85,6 +85,7 @@ type OrderDetailRow = {
   shippingTotal: Decimal;
   taxTotal: Decimal;
   grandTotal: Decimal;
+  couponCode: string | null;
   shippingAddress: Prisma.JsonValue;
   createdAt: Date;
   user: { id: string; email: string; name: string };
@@ -121,6 +122,7 @@ function toDetail(order: OrderDetailRow): AdminOrderDetailDto {
     shippingTotal: toMoney(order.shippingTotal),
     taxTotal: toMoney(order.taxTotal),
     grandTotal: toMoney(order.grandTotal),
+    couponCode: order.couponCode,
     shippingAddress: order.shippingAddress as AdminOrderDetailDto['shippingAddress'],
     customer: order.user,
     items,
