@@ -102,6 +102,34 @@ export const adminProductVariantDtoSchema = z
   .strict();
 export type AdminProductVariantDto = z.infer<typeof adminProductVariantDtoSchema>;
 
+export const createProductImageInputSchema = z
+  .object({
+    url: httpsUrlSchema,
+    altText: z.string().trim().min(1).max(200),
+    position: z.number().int().min(0).optional(),
+  })
+  .strict();
+export type CreateProductImageInput = z.infer<typeof createProductImageInputSchema>;
+
+export const updateProductImageInputSchema = z
+  .object({
+    altText: z.string().trim().min(1).max(200).optional(),
+    position: z.number().int().min(0).optional(),
+  })
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, { message: 'At least one field is required' });
+export type UpdateProductImageInput = z.infer<typeof updateProductImageInputSchema>;
+
+export const adminProductImageDtoSchema = z
+  .object({
+    id: z.string().uuid(),
+    url: httpsUrlSchema,
+    altText: z.string(),
+    position: z.number().int(),
+  })
+  .strict();
+export type AdminProductImageDto = z.infer<typeof adminProductImageDtoSchema>;
+
 export const adminProductSummaryDtoSchema = z
   .object({
     id: z.string().uuid(),
@@ -133,6 +161,7 @@ export const adminProductDetailDtoSchema = z
     seoDescription: z.string().nullable(),
     specs: specsSchema,
     variants: z.array(adminProductVariantDtoSchema),
+    images: z.array(adminProductImageDtoSchema),
     createdAt: z.string(),
   })
   .strict();

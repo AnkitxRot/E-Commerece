@@ -1,14 +1,16 @@
-import type { Prisma } from '@prisma/client';
 import type { Decimal } from '@prisma/client/runtime/library';
 import type {
   AdminProductDetailDto,
   AdminProductListQuery,
   AdminProductListResponse,
   AdminProductSummaryDto,
+  CreateProductImageInput,
   CreateProductInput,
+  UpdateProductImageInput,
   UpdateProductInput,
   UpdateVariantInput,
 } from '@audio-commerce/shared';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { toMoney, toMoneyNullable } from '../catalog/money.js';
@@ -65,6 +67,7 @@ type ProductDetailRow = {
     priceOverride: Decimal | null;
     compareAtPrice: Decimal | null;
   }[];
+  images: { id: string; url: string; altText: string; position: number }[];
 };
 
 function toDetail(product: ProductDetailRow): AdminProductDetailDto {
@@ -92,6 +95,12 @@ function toDetail(product: ProductDetailRow): AdminProductDetailDto {
       priceOverride: toMoneyNullable(variant.priceOverride),
       compareAtPrice: toMoneyNullable(variant.compareAtPrice),
     })),
+    images: product.images.map((image) => ({
+      id: image.id,
+      url: image.url,
+      altText: image.altText,
+      position: image.position,
+    })),
   };
 }
 
@@ -101,7 +110,10 @@ const summaryInclude = {
   variants: { select: { stockQty: true, reservedQty: true, lowStockThreshold: true } },
 };
 
-const detailInclude = { variants: { orderBy: [{ createdAt: 'asc' as const }] } };
+const detailInclude = {
+  variants: { orderBy: [{ createdAt: 'asc' as const }] },
+  images: { orderBy: [{ position: 'asc' as const }, { id: 'asc' as const }] },
+};
 
 export async function listProducts(query: AdminProductListQuery): Promise<AdminProductListResponse> {
   const where: Prisma.ProductWhereInput = {};
@@ -269,6 +281,75 @@ export async function updateVariant(
     });
     await recordAudit(actorId, 'product.variant.update', 'ProductVariant', variantId, input as Prisma.InputJsonValue, tx);
   });
+
+  return getProductById(productId);
+}
+
+export async function addImage(
+  actorId: string,
+  productId: string,
+  input: CreateProductImageInput,
+): Promise<AdminProductDetailDto> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) throw new NotFoundError('Product not found');
+
+  await prisma.$transaction(async (tx) => {
+    let position = input.position;
+    if (position === undefined) {
+      const highest = await tx.productImage.aggregate({ where: { productId }, _max: { position: true } });
+      position = (highest._max.position ?? -1) + 1;
+    }
+    const image = await tx.productImage.create({
+      data: { productId, url: input.url, altText: input.altText, position },
+    });
+    await recordAudit(actorId, 'product.image.create', 'ProductImage', image.id, { productId, url: image.url }, tx);
+  });
+
+  return getProductById(productId);
+}
+
+export async function updateImage(
+  actorId: string,
+  productId: string,
+  imageId: string,
+  input: UpdateProductImageInput,
+): Promise<AdminProductDetailDto> {
+  const image = await prisma.productImage.findFirst({ where: { id: imageId, productId } });
+  if (!image) throw new NotFoundError('Image not found');
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.productImage.update({
+        where: { id: imageId },
+        data: { altText: input.altText, position: input.position },
+      });
+      await recordAudit(actorId, 'product.image.update', 'ProductImage', imageId, input as Prisma.InputJsonValue, tx);
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+      throw new NotFoundError('Image not found');
+    }
+    throw err;
+  }
+
+  return getProductById(productId);
+}
+
+export async function deleteImage(actorId: string, productId: string, imageId: string): Promise<AdminProductDetailDto> {
+  const image = await prisma.productImage.findFirst({ where: { id: imageId, productId } });
+  if (!image) throw new NotFoundError('Image not found');
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.productImage.delete({ where: { id: imageId } });
+      await recordAudit(actorId, 'product.image.delete', 'ProductImage', imageId, { productId, url: image.url }, tx);
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
+      throw new NotFoundError('Image not found');
+    }
+    throw err;
+  }
 
   return getProductById(productId);
 }

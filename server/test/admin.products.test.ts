@@ -173,3 +173,168 @@ describe('admin products', () => {
     expect(unrelatedUpdate.body.product.brandId).toBe(brand.id);
   });
 });
+
+describe('admin product images', () => {
+  async function createProduct(token: string, categoryId: string) {
+    const res = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(categoryId));
+    return res.body.product.id as string;
+  }
+
+  it('rejects unauthenticated and non-admin callers', async () => {
+    const token = await registerAdmin('img-admin1@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+
+    const res401 = await request(app).post(`/api/admin/products/${productId}/images`);
+    expect(res401.status).toBe(401);
+
+    const customerToken = await registerCustomer('img-customer@example.com');
+    const res403 = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ url: 'https://example.com/a.jpg', altText: 'A speaker' });
+    expect(res403.status).toBe(403);
+  });
+
+  it('adds images, auto-assigning position in append order when omitted', async () => {
+    const token = await registerAdmin('img-admin2@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+
+    const first = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/a.jpg', altText: 'Front view' });
+    expect(first.status).toBe(201);
+    expect(first.body.product.images).toHaveLength(1);
+    expect(first.body.product.images[0]).toMatchObject({ url: 'https://example.com/a.jpg', altText: 'Front view', position: 0 });
+
+    const second = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/b.jpg', altText: 'Side view' });
+    expect(second.status).toBe(201);
+    expect(second.body.product.images).toHaveLength(2);
+    expect(second.body.product.images[1]).toMatchObject({ url: 'https://example.com/b.jpg', position: 1 });
+
+    const auditRows = await prisma.auditLog.findMany({ where: { action: 'product.image.create' } });
+    expect(auditRows.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('rejects a non-https url and missing alt text', async () => {
+    const token = await registerAdmin('img-admin3@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+
+    const badUrl = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'http://example.com/a.jpg', altText: 'Front view' });
+    expect(badUrl.status).toBe(400);
+
+    const badAlt = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/a.jpg', altText: '' });
+    expect(badAlt.status).toBe(400);
+  });
+
+  it('404s adding an image to an unknown product', async () => {
+    const token = await registerAdmin('img-admin4@example.com');
+    const res = await request(app)
+      .post('/api/admin/products/00000000-0000-0000-0000-000000000000/images')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/a.jpg', altText: 'Front view' });
+    expect(res.status).toBe(404);
+  });
+
+  it('updates alt text and position, and treats an image from another product as not found', async () => {
+    const token = await registerAdmin('img-admin5@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+    const otherProductId = await createProduct(token, category.id);
+
+    const added = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/a.jpg', altText: 'Front view' });
+    const imageId = added.body.product.images[0].id as string;
+
+    const updateRes = await request(app)
+      .patch(`/api/admin/products/${productId}/images/${imageId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ altText: 'Updated alt', position: 3 });
+    expect(updateRes.status).toBe(200);
+    expect(updateRes.body.product.images[0]).toMatchObject({ altText: 'Updated alt', position: 3 });
+
+    const crossProduct = await request(app)
+      .patch(`/api/admin/products/${otherProductId}/images/${imageId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ altText: 'Hijacked' });
+    expect(crossProduct.status).toBe(404);
+
+    const auditRows = await prisma.auditLog.findMany({ where: { action: 'product.image.update', entityId: imageId } });
+    expect(auditRows).toHaveLength(1);
+  });
+
+  it('deletes an image and 404s on a repeat delete or an unknown image', async () => {
+    const token = await registerAdmin('img-admin6@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+
+    const added = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/a.jpg', altText: 'Front view' });
+    const imageId = added.body.product.images[0].id as string;
+
+    const deleteRes = await request(app)
+      .delete(`/api/admin/products/${productId}/images/${imageId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.product.images).toHaveLength(0);
+
+    const repeatDelete = await request(app)
+      .delete(`/api/admin/products/${productId}/images/${imageId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(repeatDelete.status).toBe(404);
+
+    const auditRows = await prisma.auditLog.findMany({ where: { action: 'product.image.delete', entityId: imageId } });
+    expect(auditRows).toHaveLength(1);
+  });
+
+  it('leaves a product purchasable with zero images (no minimum-image invariant)', async () => {
+    const token = await registerAdmin('img-admin7@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+
+    const getRes = await request(app).get(`/api/admin/products/${productId}`).set('Authorization', `Bearer ${token}`);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.product.images).toEqual([]);
+  });
+
+  it('never surfaces a raw 500 when two concurrent image adds race on the same product', async () => {
+    const token = await registerAdmin('img-admin8@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+
+    const [a, b] = await Promise.all([
+      request(app)
+        .post(`/api/admin/products/${productId}/images`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ url: 'https://example.com/a.jpg', altText: 'A' }),
+      request(app)
+        .post(`/api/admin/products/${productId}/images`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ url: 'https://example.com/b.jpg', altText: 'B' }),
+    ]);
+    expect(a.status).toBe(201);
+    expect(b.status).toBe(201);
+
+    const final = await request(app).get(`/api/admin/products/${productId}`).set('Authorization', `Bearer ${token}`);
+    expect(final.body.product.images).toHaveLength(2);
+  });
+});

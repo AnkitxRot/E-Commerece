@@ -2,7 +2,9 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import {
   adminProductListQuerySchema,
+  createProductImageInputSchema,
   createProductInputSchema,
+  updateProductImageInputSchema,
   updateProductInputSchema,
   updateVariantInputSchema,
 } from '@audio-commerce/shared';
@@ -17,6 +19,7 @@ const asyncHandler =
 
 const idParamsSchema = z.object({ id: z.string().uuid() }).strict();
 const variantParamsSchema = z.object({ id: z.string().uuid(), variantId: z.string().uuid() }).strict();
+const imageParamsSchema = z.object({ id: z.string().uuid(), imageId: z.string().uuid() }).strict();
 
 export const adminProductsRouter = Router();
 
@@ -34,4 +37,21 @@ adminProductsRouter.patch(
   validate(variantParamsSchema, 'params'),
   validate(updateVariantInputSchema),
   asyncHandler(controller.updateVariantHandler),
+);
+adminProductsRouter.post(
+  '/:id/images',
+  validate(idParamsSchema, 'params'),
+  validate(createProductImageInputSchema),
+  asyncHandler(controller.addImageHandler),
+);
+adminProductsRouter.patch(
+  '/:id/images/:imageId',
+  validate(imageParamsSchema, 'params'),
+  validate(updateProductImageInputSchema),
+  asyncHandler(controller.updateImageHandler),
+);
+adminProductsRouter.delete(
+  '/:id/images/:imageId',
+  validate(imageParamsSchema, 'params'),
+  asyncHandler(controller.deleteImageHandler),
 );

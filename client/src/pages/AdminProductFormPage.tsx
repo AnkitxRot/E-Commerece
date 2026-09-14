@@ -6,6 +6,7 @@ import {
   adminBrandListResponseSchema,
   adminCategoryListResponseSchema,
   adminProductResponseSchema,
+  createProductImageInputSchema,
   createProductInputSchema,
   updateProductInputSchema,
   updateVariantInputSchema,
@@ -74,6 +75,13 @@ export default function AdminProductFormPage() {
   );
   const [variantSavingId, setVariantSavingId] = useState<string | null>(null);
   const [variantError, setVariantError] = useState<string | null>(null);
+
+  const [imageUrl, setImageUrl] = useState('');
+  const [imageAlt, setImageAlt] = useState('');
+  const [imageFieldErrors, setImageFieldErrors] = useState<Record<string, string>>({});
+  const [imageError, setImageError] = useState<string | null>(null);
+  const [imageSubmitting, setImageSubmitting] = useState(false);
+  const [imageDeletingId, setImageDeletingId] = useState<string | null>(null);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -217,6 +225,47 @@ export default function AdminProductFormPage() {
       setVariantError(err instanceof ApiError ? err.message : 'Unable to update this variant right now.');
     } finally {
       setVariantSavingId(null);
+    }
+  }
+
+  async function handleAddImage(event: FormEvent) {
+    event.preventDefault();
+    if (!product) return;
+    setImageFieldErrors({});
+    setImageError(null);
+    const result = createProductImageInputSchema.safeParse({ url: imageUrl, altText: imageAlt });
+    if (!result.success) {
+      setImageFieldErrors(collectFieldErrors(result.error));
+      return;
+    }
+    setImageSubmitting(true);
+    try {
+      const data = await apiFetch(`/api/admin/products/${product.id}/images`, {
+        method: 'POST',
+        body: JSON.stringify(result.data),
+      });
+      setProduct(parseCatalog(adminProductResponseSchema, data).product);
+      setImageUrl('');
+      setImageAlt('');
+    } catch (err) {
+      setImageError(err instanceof ApiError ? err.message : 'Unable to add this image right now.');
+    } finally {
+      setImageSubmitting(false);
+    }
+  }
+
+  async function handleDeleteImage(imageId: string) {
+    if (!product) return;
+    if (!window.confirm('Remove this image from the product?')) return;
+    setImageDeletingId(imageId);
+    setImageError(null);
+    try {
+      const data = await apiFetch(`/api/admin/products/${product.id}/images/${imageId}`, { method: 'DELETE' });
+      setProduct(parseCatalog(adminProductResponseSchema, data).product);
+    } catch (err) {
+      setImageError(err instanceof ApiError ? err.message : 'Unable to remove this image right now.');
+    } finally {
+      setImageDeletingId(null);
     }
   }
 
@@ -470,6 +519,57 @@ export default function AdminProductFormPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+
+      {isEdit && product && (
+        <div>
+          <h2 className="mb-3 text-lg font-semibold text-ink">Images</h2>
+          {imageError && (
+            <p role="alert" className="mb-2 text-sm text-danger">
+              {imageError}
+            </p>
+          )}
+          {product.images.length > 0 && (
+            <ul className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {product.images.map((image) => (
+                <li key={image.id} className="flex flex-col gap-2 rounded-lg border border-border p-2">
+                  <img src={image.url} alt={image.altText} className="aspect-square w-full rounded-sm object-cover" />
+                  <p className="truncate text-xs text-ink-muted" title={image.altText}>
+                    {image.altText}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={imageDeletingId === image.id}
+                    onClick={() => void handleDeleteImage(image.id)}
+                  >
+                    Remove
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form onSubmit={handleAddImage} noValidate className="flex max-w-2xl flex-col gap-4">
+            <Input
+              id="imageUrl"
+              label="Image URL (https)"
+              value={imageUrl}
+              error={imageFieldErrors.url}
+              onChange={(e) => setImageUrl(e.target.value)}
+              placeholder="https://example.com/photo.jpg"
+            />
+            <Input
+              id="imageAlt"
+              label="Alt text"
+              value={imageAlt}
+              error={imageFieldErrors.altText}
+              onChange={(e) => setImageAlt(e.target.value)}
+            />
+            <Button type="submit" loading={imageSubmitting} variant="secondary" className="self-start">
+              Add image
+            </Button>
+          </form>
         </div>
       )}
     </div>

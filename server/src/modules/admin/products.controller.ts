@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
 import type {
   AdminProductListQuery,
+  CreateProductImageInput,
   CreateProductInput,
+  UpdateProductImageInput,
   UpdateProductInput,
   UpdateVariantInput,
 } from '@audio-commerce/shared';
@@ -34,5 +36,25 @@ export async function updateVariantHandler(req: Request, res: Response) {
     req.params.variantId,
     req.body as UpdateVariantInput,
   );
+  res.status(200).json({ product });
+}
+
+export async function addImageHandler(req: Request, res: Response) {
+  const product = await productsService.addImage(req.user!.id, req.params.id, req.body as CreateProductImageInput);
+  res.status(201).json({ product });
+}
+
+export async function updateImageHandler(req: Request, res: Response) {
+  const product = await productsService.updateImage(
+    req.user!.id,
+    req.params.id,
+    req.params.imageId,
+    req.body as UpdateProductImageInput,
+  );
+  res.status(200).json({ product });
+}
+
+export async function deleteImageHandler(req: Request, res: Response) {
+  const product = await productsService.deleteImage(req.user!.id, req.params.id, req.params.imageId);
   res.status(200).json({ product });
 }

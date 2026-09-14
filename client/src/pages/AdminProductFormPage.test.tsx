@@ -131,6 +131,7 @@ describe('AdminProductFormPage (edit)', () => {
             compareAtPrice: null,
           },
         ],
+        images: [],
       },
     };
     const updatedDetail = {
