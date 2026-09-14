@@ -150,10 +150,11 @@ describe('GET /api/catalog/home', () => {
     );
   });
 
-  it('preserves position order across multiple FEATURED_COLLECTION blocks resolved concurrently', async () => {
-    // Each FEATURED_COLLECTION block runs its own product query; getHome resolves
-    // them concurrently rather than one-by-one. This pins down that concurrent
-    // resolution still returns blocks in stored position order, not resolution order.
+  it('orders multiple FEATURED_COLLECTION blocks by position, independent of insertion or id order', async () => {
+    // getHome resolves blocks via Promise.all (each FEATURED_COLLECTION block runs its
+    // own product query) rather than one-by-one. Promise.all preserves the input array's
+    // order regardless of settle timing, so this is really an end-to-end check that the
+    // response order follows the query's `ORDER BY position` and not insertion/id order.
     await upsertSettings({});
     await seedHomeProducts();
     const second = await prisma.contentBlock.create({
