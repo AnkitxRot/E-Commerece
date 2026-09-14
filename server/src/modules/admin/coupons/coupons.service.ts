@@ -1,7 +1,13 @@
 import type { Coupon, Prisma } from '@prisma/client';
-import type { AdminCouponDto, AdminCouponListResponse, CreateCouponInput, UpdateCouponInput } from '@audio-commerce/shared';
+import {
+  couponValueError,
+  type AdminCouponDto,
+  type AdminCouponListResponse,
+  type CreateCouponInput,
+  type UpdateCouponInput,
+} from '@audio-commerce/shared';
 import { prisma } from '../../../lib/prisma.js';
-import { ConflictError, NotFoundError } from '../../../errors/AppError.js';
+import { ConflictError, NotFoundError, ValidationError } from '../../../errors/AppError.js';
 import { recordAudit } from '../audit.js';
 import { toMoney } from '../../catalog/money.js';
 
@@ -61,6 +67,11 @@ export async function createCoupon(actorId: string, input: CreateCouponInput): P
 export async function updateCoupon(actorId: string, id: string, input: UpdateCouponInput): Promise<AdminCouponDto> {
   const existing = await prisma.coupon.findUnique({ where: { id } });
   if (!existing) throw new NotFoundError('Coupon not found');
+
+  if (input.value !== undefined) {
+    const message = couponValueError(existing.type as CreateCouponInput['type'], input.value);
+    if (message) throw new ValidationError(message);
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const coupon = await tx.coupon.update({

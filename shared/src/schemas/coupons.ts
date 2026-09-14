@@ -30,6 +30,20 @@ export type CouponPreviewResponse = z.infer<typeof couponPreviewResponseSchema>;
 
 // ---- Admin: coupon management ----
 
+/** Shared by createCouponInputSchema's superRefine and the admin update
+ * service (which re-checks this against the coupon's existing `type`,
+ * since `type` itself is immutable and not part of the update payload). */
+export function couponValueError(type: CouponType, value: string): string | null {
+  const numeric = Number(value);
+  if (type === CouponType.PERCENT && (numeric <= 0 || numeric > 100)) {
+    return 'A percent coupon must have a value between 0.01 and 100';
+  }
+  if (type === CouponType.FIXED && numeric <= 0) {
+    return 'A fixed coupon must have a value greater than 0';
+  }
+  return null;
+}
+
 export const createCouponInputSchema = z
   .object({
     code: couponCodeSchema,
@@ -41,21 +55,8 @@ export const createCouponInputSchema = z
   })
   .strict()
   .superRefine((data, ctx) => {
-    const value = Number(data.value);
-    if (data.type === CouponType.PERCENT && (value <= 0 || value > 100)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['value'],
-        message: 'A percent coupon must have a value between 0.01 and 100',
-      });
-    }
-    if (data.type === CouponType.FIXED && value <= 0) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['value'],
-        message: 'A fixed coupon must have a value greater than 0',
-      });
-    }
+    const message = couponValueError(data.type, data.value);
+    if (message) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['value'], message });
   });
 export type CreateCouponInput = z.infer<typeof createCouponInputSchema>;
 

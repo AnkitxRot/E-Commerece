@@ -87,6 +87,23 @@ describe('admin coupons', () => {
     expect(zeroFixed.status).toBe(400);
   });
 
+  it('rejects updating a PERCENT coupon to an out-of-range value', async () => {
+    const token = await registerAdmin('coupon-admin2b@example.com');
+    const created = await request(app)
+      .post('/api/admin/coupons')
+      .set('Authorization', `Bearer ${token}`)
+      .send(couponPayload({ type: 'PERCENT', value: '10.00' }));
+
+    const res = await request(app)
+      .patch(`/api/admin/coupons/${created.body.coupon.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ value: '500.00' });
+    expect(res.status).toBe(400);
+
+    const unchanged = await prisma.coupon.findUnique({ where: { id: created.body.coupon.id } });
+    expect(unchanged?.value.toString()).toBe('10');
+  });
+
   it('returns 404 for updating an unknown coupon', async () => {
     const token = await registerAdmin('coupon-admin3@example.com');
     const res = await request(app)
