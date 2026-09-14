@@ -284,4 +284,32 @@ describe('admin products', () => {
       .set('Authorization', `Bearer ${customerToken}`);
     expect(deleteCustomer.status).toBe(403);
   });
+
+  it('never leaves a product with zero variants when two concurrent deletes target its two variants', async () => {
+    const token = await registerAdmin('prod-admin10@example.com');
+    const category = await createTestCategory();
+    const createRes = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id));
+    const productId = createRes.body.product.id;
+    const firstVariantId = createRes.body.product.variants[0].id;
+
+    const addSecond = await request(app)
+      .post(`/api/admin/products/${productId}/variants`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sku: `SECOND-${Date.now()}`, attributes: { color: 'Silver' }, stockQty: 5, lowStockThreshold: 2 });
+    const secondVariantId = addSecond.body.product.variants[1].id;
+
+    const [resA, resB] = await Promise.all([
+      request(app).delete(`/api/admin/products/${productId}/variants/${firstVariantId}`).set('Authorization', `Bearer ${token}`),
+      request(app).delete(`/api/admin/products/${productId}/variants/${secondVariantId}`).set('Authorization', `Bearer ${token}`),
+    ]);
+
+    const statuses = [resA.status, resB.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    const remaining = await prisma.productVariant.findMany({ where: { productId } });
+    expect(remaining).toHaveLength(1);
+  });
 });

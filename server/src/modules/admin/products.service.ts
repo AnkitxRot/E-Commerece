@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import type { Decimal } from '@prisma/client/runtime/library';
 import type {
   AdminProductDetailDto,
@@ -285,46 +285,56 @@ export async function createVariant(
   const clashingSku = await prisma.productVariant.findUnique({ where: { sku: input.sku } });
   if (clashingSku) throw new ConflictError(`SKU already in use: ${input.sku}`);
 
-  await prisma.$transaction(async (tx) => {
-    const variant = await tx.productVariant.create({
-      data: {
-        productId,
-        sku: input.sku,
-        attributes: input.attributes,
-        stockQty: input.stockQty,
-        lowStockThreshold: input.lowStockThreshold,
-        priceOverride: input.priceOverride ?? null,
-        compareAtPrice: input.compareAtPrice ?? null,
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      const variant = await tx.productVariant.create({
+        data: {
+          productId,
+          sku: input.sku,
+          attributes: input.attributes,
+          stockQty: input.stockQty,
+          lowStockThreshold: input.lowStockThreshold,
+          priceOverride: input.priceOverride ?? null,
+          compareAtPrice: input.compareAtPrice ?? null,
+        },
+      });
+      await recordAudit(actorId, 'product.variant.create', 'ProductVariant', variant.id, { sku: variant.sku, productId }, tx);
     });
-    await recordAudit(actorId, 'product.variant.create', 'ProductVariant', variant.id, { sku: variant.sku, productId }, tx);
-  });
+  } catch (err) {
+    // The check above is a convenience, not the authoritative guard — sku
+    // has a DB-level unique constraint, so a concurrent create racing the
+    // same SKU past that check is caught here instead of surfacing as a
+    // raw 500. Same pattern reviews.service.ts uses for its own unique
+    // constraint (one review per product per user).
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      throw new ConflictError(`SKU already in use: ${input.sku}`);
+    }
+    throw err;
+  }
 
   return getProductById(productId);
 }
 
 export async function deleteVariant(actorId: string, productId: string, variantId: string): Promise<AdminProductDetailDto> {
-  // Known, accepted narrow race: two concurrent deletes targeting two
-  // DIFFERENT variants of the same 2-variant product could both read
-  // variantCount=2 here and both proceed, leaving zero variants. Unlike the
-  // stock/coupon/default-address guards elsewhere in this codebase, this
-  // isn't backed by a DB-level constraint (Postgres has no simple way to
-  // express "at least one child row per parent" short of a trigger, which
-  // has no precedent in this schema). Accepted because it requires an
-  // admin to deliberately click delete on two different rows within
-  // milliseconds of each other, and the worst outcome is a data-quality
-  // issue (an admin adding a variant back), never a security or financial
-  // one — unlike the invariants that DO have DB-level backstops.
-  const [variant, variantCount] = await Promise.all([
-    prisma.productVariant.findFirst({ where: { id: variantId, productId } }),
-    prisma.productVariant.count({ where: { productId } }),
-  ]);
+  const variant = await prisma.productVariant.findFirst({ where: { id: variantId, productId } });
   if (!variant) throw new NotFoundError('Variant not found');
-  if (variantCount <= 1) {
-    throw new ConflictError("Cannot delete a product's last remaining variant — every product needs at least one.");
-  }
 
   await prisma.$transaction(async (tx) => {
+    // SELECT ... FOR UPDATE locks every one of this product's variant rows
+    // for the rest of this transaction. A concurrent delete of a SIBLING
+    // variant, running the same lock query, blocks here until this
+    // transaction commits or rolls back — so two concurrent deletes can
+    // never both see "2 variants left" and both proceed, unlike a plain
+    // count() read outside a lock would allow. Once unblocked, the second
+    // transaction re-evaluates against the now-current state and correctly
+    // hits the ConflictError below.
+    const locked = await tx.$queryRaw<
+      { id: string }[]
+    >`SELECT id FROM "ProductVariant" WHERE "productId" = ${productId} FOR UPDATE`;
+    if (locked.length <= 1) {
+      throw new ConflictError("Cannot delete a product's last remaining variant — every product needs at least one.");
+    }
+
     // Discontinuing a variant removes it from any customer's in-progress
     // cart too (CartItem.variantId is ON DELETE RESTRICT, so this delete
     // would otherwise fail outright while anyone has it in their cart). A
