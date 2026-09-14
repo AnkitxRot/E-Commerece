@@ -280,16 +280,56 @@ describe('admin product images', () => {
     expect(auditRows).toHaveLength(1);
   });
 
-  it('deletes an image and 404s on a repeat delete or an unknown image', async () => {
+  it('rejects an empty alt text on update, and tolerates an explicit position colliding with another image', async () => {
+    const token = await registerAdmin('img-admin5b@example.com');
+    const category = await createTestCategory();
+    const productId = await createProduct(token, category.id);
+
+    const first = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/a.jpg', altText: 'Front view' });
+    const second = await request(app)
+      .post(`/api/admin/products/${productId}/images`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ url: 'https://example.com/b.jpg', altText: 'Side view' });
+    const firstId = first.body.product.images[0].id as string;
+    const secondId = second.body.product.images[1].id as string;
+
+    const badAlt = await request(app)
+      .patch(`/api/admin/products/${productId}/images/${firstId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ altText: '' });
+    expect(badAlt.status).toBe(400);
+
+    // Position has no uniqueness constraint — it is display ordering only, with a
+    // deterministic `id` tie-break (see detailInclude's orderBy). Colliding positions
+    // are tolerated, not an error.
+    const collide = await request(app)
+      .patch(`/api/admin/products/${productId}/images/${secondId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ position: 0 });
+    expect(collide.status).toBe(200);
+    const positions = (collide.body.product.images as { id: string; position: number }[]).map((i) => i.position);
+    expect(positions).toEqual([0, 0]);
+  });
+
+  it('deletes an image and 404s on a repeat delete, an unknown image, or a cross-product image id', async () => {
     const token = await registerAdmin('img-admin6@example.com');
     const category = await createTestCategory();
     const productId = await createProduct(token, category.id);
+    const otherProductId = await createProduct(token, category.id);
 
     const added = await request(app)
       .post(`/api/admin/products/${productId}/images`)
       .set('Authorization', `Bearer ${token}`)
       .send({ url: 'https://example.com/a.jpg', altText: 'Front view' });
     const imageId = added.body.product.images[0].id as string;
+
+    const crossProductDelete = await request(app)
+      .delete(`/api/admin/products/${otherProductId}/images/${imageId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(crossProductDelete.status).toBe(404);
 
     const deleteRes = await request(app)
       .delete(`/api/admin/products/${productId}/images/${imageId}`)
@@ -333,6 +373,15 @@ describe('admin product images', () => {
     ]);
     expect(a.status).toBe(201);
     expect(b.status).toBe(201);
+    // No uniqueness invariant on position, so a race can legitimately assign both
+    // images the same auto-computed position (see the comment in addImage) — that's
+    // an accepted, harmless outcome, not a bug this test needs to rule out. What
+    // matters here is that neither request ever surfaces a raw 500/crash.
+    const rowsForProduct = await prisma.productImage.findMany({ where: { productId } });
+    expect(rowsForProduct).toHaveLength(2);
+    for (const row of rowsForProduct) {
+      expect(row.position).toBeGreaterThanOrEqual(0);
+    }
 
     const final = await request(app).get(`/api/admin/products/${productId}`).set('Authorization', `Bearer ${token}`);
     expect(final.body.product.images).toHaveLength(2);

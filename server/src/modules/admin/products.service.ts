@@ -294,6 +294,10 @@ export async function addImage(
   if (!product) throw new NotFoundError('Product not found');
 
   await prisma.$transaction(async (tx) => {
+    // Position is display ordering only (no uniqueness constraint; ties break on `id`,
+    // see detailInclude's orderBy) — two concurrent adds can both compute the same
+    // "next" position. That's tolerated, not a bug: no invariant depends on positions
+    // being distinct or contiguous, unlike the variant-count invariant elsewhere.
     let position = input.position;
     if (position === undefined) {
       const highest = await tx.productImage.aggregate({ where: { productId }, _max: { position: true } });
@@ -323,7 +327,14 @@ export async function updateImage(
         where: { id: imageId },
         data: { altText: input.altText, position: input.position },
       });
-      await recordAudit(actorId, 'product.image.update', 'ProductImage', imageId, input as Prisma.InputJsonValue, tx);
+      await recordAudit(
+        actorId,
+        'product.image.update',
+        'ProductImage',
+        imageId,
+        { productId, ...input } as Prisma.InputJsonValue,
+        tx,
+      );
     });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025') {
