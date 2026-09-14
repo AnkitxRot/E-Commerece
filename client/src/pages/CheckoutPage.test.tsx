@@ -89,7 +89,9 @@ describe('CheckoutPage', () => {
     renderCheckout();
     await userEvent.click(screen.getByRole('button', { name: 'Place order' }));
     expect((await screen.findAllByRole('alert')).length).toBeGreaterThan(0);
-    expect(vi.mocked(apiFetch)).not.toHaveBeenCalled();
+    // The saved-addresses list is fetched in the background regardless, but
+    // no order should ever be submitted for an invalid manual address.
+    expect(vi.mocked(apiFetch)).not.toHaveBeenCalledWith('/api/orders', expect.anything());
   });
 
   it('places the order and navigates to the confirmation page', async () => {
@@ -129,6 +131,103 @@ describe('CheckoutPage', () => {
       '/api/orders',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  const SAVED_ADDRESSES = [
+    {
+      id: '44444444-4444-4444-8444-444444444444',
+      label: 'Home',
+      line1: '10 Downing Street',
+      line2: null,
+      city: 'London',
+      state: 'London',
+      postalCode: 'SW1A 2AA',
+      country: 'UK',
+      phone: '5551234567',
+      isDefault: true,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  ];
+
+  function mockOrdersAndAddresses(addresses: typeof SAVED_ADDRESSES, orderId = '55555555-5555-4555-8555-555555555555') {
+    vi.mocked(apiFetch).mockImplementation((path: string) => {
+      if (path === '/api/addresses') return Promise.resolve({ addresses });
+      if (path === '/api/orders') {
+        return Promise.resolve({
+          order: {
+            id: orderId,
+            status: 'CONFIRMED',
+            currency: 'INR',
+            subtotal: '500.00',
+            discountTotal: '0.00',
+            shippingTotal: '79.00',
+            taxTotal: '0.00',
+            grandTotal: '579.00',
+            shippingAddress: {
+              fullName: 'Priya Sharma',
+              line1: '10 Downing Street',
+              city: 'London',
+              state: 'London',
+              postalCode: 'SW1A 2AA',
+              country: 'UK',
+              phone: '5551234567',
+            },
+            items: [],
+            createdAt: '2026-01-01T00:00:00.000Z',
+          },
+        });
+      }
+      return Promise.reject(new Error(`unexpected path ${path}`));
+    });
+  }
+
+  it('pre-selects the default saved address and checks out with it, without showing the manual form', async () => {
+    mockCart(cartWithItem);
+    mockOrdersAndAddresses(SAVED_ADDRESSES);
+    renderCheckout();
+
+    await screen.findByText('Home (default)');
+    expect(screen.queryByLabelText('Full name')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Place order' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('order-page-55555555-5555-4555-8555-555555555555-confirmed=1')).toBeInTheDocument();
+    });
+    expect(vi.mocked(apiFetch)).toHaveBeenCalledWith(
+      '/api/orders',
+      expect.objectContaining({ body: JSON.stringify({ addressId: SAVED_ADDRESSES[0].id }) }),
+    );
+  });
+
+  it('switches to the manual form when "Enter a new address" is chosen', async () => {
+    mockCart(cartWithItem);
+    mockOrdersAndAddresses(SAVED_ADDRESSES);
+    renderCheckout();
+
+    await screen.findByText('Home (default)');
+    await userEvent.click(screen.getByRole('radio', { name: 'Enter a new address' }));
+    expect(screen.getByLabelText('Full name')).toBeInTheDocument();
+
+    await fillAddress();
+    await userEvent.click(screen.getByRole('button', { name: 'Place order' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('order-page-55555555-5555-4555-8555-555555555555-confirmed=1')).toBeInTheDocument();
+    });
+    const call = vi.mocked(apiFetch).mock.calls.find(([path]) => path === '/api/orders');
+    expect(JSON.parse((call?.[1] as RequestInit).body as string)).toHaveProperty('shippingAddress');
+  });
+
+  it('shows only the manual form when there are no saved addresses', async () => {
+    mockCart(cartWithItem);
+    mockOrdersAndAddresses([]);
+    renderCheckout();
+
+    await waitFor(() => expect(vi.mocked(apiFetch)).toHaveBeenCalledWith('/api/addresses', expect.anything()));
+    expect(screen.getByLabelText('Full name')).toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
   });
 
   it('shows a server error message without navigating on failure', async () => {

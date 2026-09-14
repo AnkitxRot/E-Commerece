@@ -10,6 +10,7 @@ import { LoadingState } from './components/LoadingState.js';
 const LoginPage = lazy(() => import('./pages/LoginPage.js'));
 const RegisterPage = lazy(() => import('./pages/RegisterPage.js'));
 const AccountPage = lazy(() => import('./pages/AccountPage.js'));
+const AddressBookPage = lazy(() => import('./pages/AddressBookPage.js'));
 const AdminOverviewPage = lazy(() => import('./pages/AdminOverviewPage.js'));
 const AdminProductsPage = lazy(() => import('./pages/AdminProductsPage.js'));
 const AdminProductFormPage = lazy(() => import('./pages/AdminProductFormPage.js'));
@@ -44,6 +45,7 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route path="account" element={<AccountPage />} />
               <Route path="account/orders" element={<OrderHistoryPage />} />
+              <Route path="account/addresses" element={<AddressBookPage />} />
               <Route path="cart" element={<CartPage />} />
               <Route path="wishlist" element={<WishlistPage />} />
               <Route path="checkout" element={<CheckoutPage />} />

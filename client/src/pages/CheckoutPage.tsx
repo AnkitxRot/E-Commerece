@@ -1,6 +1,12 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
-import { orderResponseSchema, shippingAddressInputSchema, type ShippingAddressInput } from '@audio-commerce/shared';
+import {
+  addressListResponseSchema,
+  orderResponseSchema,
+  shippingAddressInputSchema,
+  type AddressDto,
+  type ShippingAddressInput,
+} from '@audio-commerce/shared';
 import { useCart } from '../context/CartContext.js';
 import { ApiError, apiFetch } from '../lib/apiClient.js';
 import { parseCatalog } from '../lib/parseCatalog.js';
@@ -33,6 +39,33 @@ export default function CheckoutPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // null = still loading; [] is a real, valid "no saved addresses" result —
+  // the manual-entry form below is unchanged and works identically in both
+  // cases, so nothing here blocks checkout while this loads.
+  const [savedAddresses, setSavedAddresses] = useState<AddressDto[] | null>(null);
+  // null means "enter a new address" (the pre-existing manual form). A
+  // saved addresses list, once loaded, pre-selects the default address (or
+  // the most recent one) rather than forcing the customer to pick.
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    async function load() {
+      try {
+        const data = parseCatalog(addressListResponseSchema, await apiFetch('/api/addresses', { signal: ac.signal }));
+        setSavedAddresses(data.addresses);
+        if (data.addresses.length > 0) setSelectedAddressId(data.addresses[0].id);
+      } catch {
+        // Saved addresses are a convenience, not a requirement — if this
+        // fails, silently fall back to the manual-entry form that already
+        // works without them, rather than blocking checkout entirely.
+        setSavedAddresses([]);
+      }
+    }
+    void load();
+    return () => ac.abort();
+  }, []);
+
   function set<K extends keyof ShippingAddressInput>(key: K, value: string) {
     setAddress((prev) => ({ ...prev, [key]: value }));
   }
@@ -41,6 +74,23 @@ export default function CheckoutPage() {
     event.preventDefault();
     setFieldErrors({});
     setServerError(null);
+
+    if (selectedAddressId) {
+      setSubmitting(true);
+      try {
+        const data = parseCatalog(
+          orderResponseSchema,
+          await apiFetch('/api/orders', { method: 'POST', body: JSON.stringify({ addressId: selectedAddressId }) }),
+        );
+        navigate(`/orders/${data.order.id}?confirmed=1`);
+        void refresh();
+      } catch (err) {
+        setServerError(err instanceof ApiError ? err.message : 'Unable to place your order right now.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
 
     const input = { ...address, line2: address.line2?.trim() ? address.line2 : undefined };
     const result = shippingAddressInputSchema.safeParse(input);
@@ -108,67 +158,116 @@ export default function CheckoutPage() {
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
         <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-4 lg:col-span-2">
           <h2 className="text-lg font-semibold text-ink">Shipping address</h2>
-          <Input
-            id="fullName"
-            label="Full name"
-            value={address.fullName}
-            error={fieldErrors.fullName}
-            onChange={(e) => set('fullName', e.target.value)}
-          />
-          <Input
-            id="line1"
-            label="Address line 1"
-            value={address.line1}
-            error={fieldErrors.line1}
-            onChange={(e) => set('line1', e.target.value)}
-          />
-          <Input
-            id="line2"
-            label="Address line 2 (optional)"
-            value={address.line2 ?? ''}
-            error={fieldErrors.line2}
-            onChange={(e) => set('line2', e.target.value)}
-          />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              id="city"
-              label="City"
-              value={address.city}
-              error={fieldErrors.city}
-              onChange={(e) => set('city', e.target.value)}
-            />
-            <Input
-              id="state"
-              label="State"
-              value={address.state}
-              error={fieldErrors.state}
-              onChange={(e) => set('state', e.target.value)}
-            />
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Input
-              id="postalCode"
-              label="Postal code"
-              value={address.postalCode}
-              error={fieldErrors.postalCode}
-              onChange={(e) => set('postalCode', e.target.value)}
-            />
-            <Input
-              id="country"
-              label="Country"
-              value={address.country}
-              error={fieldErrors.country}
-              onChange={(e) => set('country', e.target.value)}
-            />
-          </div>
-          <Input
-            id="phone"
-            label="Phone"
-            type="tel"
-            value={address.phone}
-            error={fieldErrors.phone}
-            onChange={(e) => set('phone', e.target.value)}
-          />
+
+          {savedAddresses && savedAddresses.length > 0 ? (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="sr-only">Choose a shipping address</legend>
+              {savedAddresses.map((saved) => (
+                <label
+                  key={saved.id}
+                  className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 text-sm has-[:checked]:border-accent"
+                >
+                  <input
+                    type="radio"
+                    name="savedAddress"
+                    className="mt-1 h-4 w-4"
+                    checked={selectedAddressId === saved.id}
+                    onChange={() => setSelectedAddressId(saved.id)}
+                  />
+                  <span>
+                    <span className="font-medium text-ink">
+                      {saved.label}
+                      {saved.isDefault ? ' (default)' : ''}
+                    </span>
+                    <br />
+                    <span className="text-ink-muted">
+                      {saved.line1}
+                      {saved.line2 ? `, ${saved.line2}` : ''}, {saved.city}, {saved.state} {saved.postalCode}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-border p-3 text-sm has-[:checked]:border-accent">
+                <input
+                  type="radio"
+                  name="savedAddress"
+                  className="h-4 w-4"
+                  checked={selectedAddressId === null}
+                  onChange={() => setSelectedAddressId(null)}
+                />
+                <span className="font-medium text-ink">Enter a new address</span>
+              </label>
+              <Link to="/account/addresses" className="self-start text-sm text-ink underline">
+                Manage saved addresses
+              </Link>
+            </fieldset>
+          ) : null}
+
+          {!selectedAddressId ? (
+            <>
+              <Input
+                id="fullName"
+                label="Full name"
+                value={address.fullName}
+                error={fieldErrors.fullName}
+                onChange={(e) => set('fullName', e.target.value)}
+              />
+              <Input
+                id="line1"
+                label="Address line 1"
+                value={address.line1}
+                error={fieldErrors.line1}
+                onChange={(e) => set('line1', e.target.value)}
+              />
+              <Input
+                id="line2"
+                label="Address line 2 (optional)"
+                value={address.line2 ?? ''}
+                error={fieldErrors.line2}
+                onChange={(e) => set('line2', e.target.value)}
+              />
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Input
+                  id="city"
+                  label="City"
+                  value={address.city}
+                  error={fieldErrors.city}
+                  onChange={(e) => set('city', e.target.value)}
+                />
+                <Input
+                  id="state"
+                  label="State"
+                  value={address.state}
+                  error={fieldErrors.state}
+                  onChange={(e) => set('state', e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Input
+                  id="postalCode"
+                  label="Postal code"
+                  value={address.postalCode}
+                  error={fieldErrors.postalCode}
+                  onChange={(e) => set('postalCode', e.target.value)}
+                />
+                <Input
+                  id="country"
+                  label="Country"
+                  value={address.country}
+                  error={fieldErrors.country}
+                  onChange={(e) => set('country', e.target.value)}
+                />
+              </div>
+              <Input
+                id="phone"
+                label="Phone"
+                type="tel"
+                value={address.phone}
+                error={fieldErrors.phone}
+                onChange={(e) => set('phone', e.target.value)}
+              />
+            </>
+          ) : null}
 
           {serverError ? (
             <p role="alert" className="text-sm text-danger">

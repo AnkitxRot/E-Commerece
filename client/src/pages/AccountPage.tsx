@@ -13,11 +13,13 @@ export default function AccountPage() {
         <Link to="/account/orders" className="inline-flex min-h-[44px] items-center text-sm text-ink underline">
           Order history
         </Link>
+        <Link to="/account/addresses" className="inline-flex min-h-[44px] items-center text-sm text-ink underline">
+          Your addresses
+        </Link>
         <Link to="/cart" className="inline-flex min-h-[44px] items-center text-sm text-ink underline">
           Your cart
         </Link>
       </div>
-      <p className="text-sm text-ink-muted mt-8">Addresses and account settings arrive in later phases.</p>
     </div>
   );
 }
