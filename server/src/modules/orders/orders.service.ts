@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma.js';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors/AppError.js';
 import { decrementStock } from '../inventory/inventory.service.js';
 import { toMoney } from '../catalog/money.js';
+import { resolveShippingAddressForCheckout } from '../addresses/addresses.service.js';
 
 const FREE_SHIPPING_THRESHOLD = new Decimal('999.00');
 const FLAT_SHIPPING_FEE = new Decimal('79.00');
@@ -63,7 +64,21 @@ const orderInclude = {
   items: { include: { product: { select: { slug: true } } }, orderBy: [{ createdAt: 'asc' as const }] },
 };
 
-export async function createOrder(userId: string, shippingAddress: ShippingAddressInput): Promise<OrderDto> {
+export async function createOrder(
+  userId: string,
+  shippingAddressInput: ShippingAddressInput | undefined,
+  addressId: string | undefined,
+): Promise<OrderDto> {
+  // Resolved once, up front, into the exact same shape either way — a saved
+  // address is looked up scoped to this user (never trusting a client's
+  // claim that an addressId is theirs) and turned into a plain object
+  // before anything else runs. From this point on the rest of this
+  // function cannot tell whether the address was typed in or selected, and
+  // what gets stored on the order is always this resolved snapshot, never
+  // a live reference to the Address row.
+  const shippingAddress =
+    shippingAddressInput ?? (await resolveShippingAddressForCheckout(userId, addressId!));
+
   const order = await prisma.$transaction(async (tx) => {
     const cart = await tx.cart.findUnique({
       where: { userId },

@@ -16,11 +16,20 @@ export const shippingAddressInputSchema = z
   .strict();
 export type ShippingAddressInput = z.infer<typeof shippingAddressInputSchema>;
 
+// Exactly one of shippingAddress (typed in at checkout) or addressId (a
+// saved address book entry) must be given — the server resolves either
+// into the same snapshot shape before creating the order, so an order's
+// stored shippingAddress is always a plain historical copy, never a live
+// reference to an Address row that could later be edited or deleted.
 export const createOrderInputSchema = z
   .object({
-    shippingAddress: shippingAddressInputSchema,
+    shippingAddress: shippingAddressInputSchema.optional(),
+    addressId: z.string().uuid().optional(),
   })
-  .strict();
+  .strict()
+  .refine((data) => Boolean(data.shippingAddress) !== Boolean(data.addressId), {
+    message: 'Provide exactly one of shippingAddress or addressId',
+  });
 export type CreateOrderInput = z.infer<typeof createOrderInputSchema>;
 
 export const orderItemDtoSchema = z

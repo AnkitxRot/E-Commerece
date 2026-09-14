@@ -93,6 +93,13 @@ model Address {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  // "At most one default address per user" is enforced at the database
+  // level via a partial unique index (see migration
+  // 20260914010000_add_address_default_unique_index), not just in
+  // application code — Prisma's schema DSL has no syntax for a filtered
+  // unique constraint (`WHERE "isDefault" = true`), so it isn't declared
+  // here, but it exists in the database and addresses.service.ts relies
+  // on it as the authoritative backstop under concurrent default changes.
   @@index([userId])
 }
 
