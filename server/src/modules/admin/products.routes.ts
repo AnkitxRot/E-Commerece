@@ -2,6 +2,7 @@ import { Router, type NextFunction, type Request, type Response } from 'express'
 import { z } from 'zod';
 import {
   adminProductListQuerySchema,
+  adminVariantInputSchema,
   createProductInputSchema,
   updateProductInputSchema,
   updateVariantInputSchema,
@@ -29,9 +30,20 @@ adminProductsRouter.patch(
   validate(updateProductInputSchema),
   asyncHandler(controller.updateProductHandler),
 );
+adminProductsRouter.post(
+  '/:id/variants',
+  validate(idParamsSchema, 'params'),
+  validate(adminVariantInputSchema),
+  asyncHandler(controller.createVariantHandler),
+);
 adminProductsRouter.patch(
   '/:id/variants/:variantId',
   validate(variantParamsSchema, 'params'),
   validate(updateVariantInputSchema),
   asyncHandler(controller.updateVariantHandler),
+);
+adminProductsRouter.delete(
+  '/:id/variants/:variantId',
+  validate(variantParamsSchema, 'params'),
+  asyncHandler(controller.deleteVariantHandler),
 );

@@ -172,4 +172,116 @@ describe('admin products', () => {
     expect(unrelatedUpdate.body.product.categoryId).toBe(category.id);
     expect(unrelatedUpdate.body.product.brandId).toBe(brand.id);
   });
+
+  it('adds a new variant to an existing product', async () => {
+    const token = await registerAdmin('prod-admin6@example.com');
+    const category = await createTestCategory();
+    const createRes = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id));
+    const productId = createRes.body.product.id;
+
+    const res = await request(app)
+      .post(`/api/admin/products/${productId}/variants`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sku: `NEW-${Date.now()}`, attributes: { color: 'Silver' }, stockQty: 5, lowStockThreshold: 2 });
+    expect(res.status).toBe(201);
+    expect(res.body.product.variants).toHaveLength(2);
+
+    const auditRows = await prisma.auditLog.findMany({ where: { action: 'product.variant.create' } });
+    expect(auditRows).toHaveLength(1);
+  });
+
+  it('rejects adding a variant with a SKU already used elsewhere, or for an unknown product', async () => {
+    const token = await registerAdmin('prod-admin7@example.com');
+    const category = await createTestCategory();
+    const first = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id));
+    const existingSku = first.body.product.variants[0].sku;
+
+    const second = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id));
+
+    const clash = await request(app)
+      .post(`/api/admin/products/${second.body.product.id}/variants`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sku: existingSku, attributes: {}, stockQty: 1, lowStockThreshold: 1 });
+    expect(clash.status).toBe(409);
+
+    const unknownProduct = await request(app)
+      .post('/api/admin/products/00000000-0000-0000-0000-000000000000/variants')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sku: `X-${Date.now()}`, attributes: {}, stockQty: 1, lowStockThreshold: 1 });
+    expect(unknownProduct.status).toBe(404);
+  });
+
+  it('deletes a variant, cascading its removal from any cart, but blocks deleting the last one', async () => {
+    const token = await registerAdmin('prod-admin8@example.com');
+    const customerToken = await registerCustomer('prod-variant-cart@example.com');
+    const category = await createTestCategory();
+    const createRes = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id));
+    const productId = createRes.body.product.id;
+    const firstVariantId = createRes.body.product.variants[0].id;
+
+    const addSecond = await request(app)
+      .post(`/api/admin/products/${productId}/variants`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sku: `SECOND-${Date.now()}`, attributes: { color: 'Silver' }, stockQty: 5, lowStockThreshold: 2 });
+    const secondVariantId = addSecond.body.product.variants[1].id;
+
+    // Put the second variant in a customer's cart before deleting it.
+    await request(app)
+      .post('/api/cart/items')
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ variantId: secondVariantId, qty: 1 });
+
+    const deleteRes = await request(app)
+      .delete(`/api/admin/products/${productId}/variants/${secondVariantId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(deleteRes.status).toBe(200);
+    expect(deleteRes.body.product.variants).toHaveLength(1);
+    expect(await prisma.productVariant.findUnique({ where: { id: secondVariantId } })).toBeNull();
+
+    const cart = await request(app).get('/api/cart').set('Authorization', `Bearer ${customerToken}`);
+    expect(cart.body.items).toHaveLength(0);
+
+    const deleteLast = await request(app)
+      .delete(`/api/admin/products/${productId}/variants/${firstVariantId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(deleteLast.status).toBe(409);
+    expect(await prisma.productVariant.findUnique({ where: { id: firstVariantId } })).not.toBeNull();
+  });
+
+  it('rejects customer and unauthenticated callers for variant create/delete', async () => {
+    const token = await registerAdmin('prod-admin9@example.com');
+    const customerToken = await registerCustomer('prod-variant-customer@example.com');
+    const category = await createTestCategory();
+    const createRes = await request(app)
+      .post('/api/admin/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send(productPayload(category.id));
+    const productId = createRes.body.product.id;
+    const variantId = createRes.body.product.variants[0].id;
+
+    const createNoAuth = await request(app).post(`/api/admin/products/${productId}/variants`).send({});
+    expect(createNoAuth.status).toBe(401);
+    const createCustomer = await request(app)
+      .post(`/api/admin/products/${productId}/variants`)
+      .set('Authorization', `Bearer ${customerToken}`)
+      .send({ sku: `X-${Date.now()}`, attributes: {}, stockQty: 1, lowStockThreshold: 1 });
+    expect(createCustomer.status).toBe(403);
+
+    const deleteCustomer = await request(app)
+      .delete(`/api/admin/products/${productId}/variants/${variantId}`)
+      .set('Authorization', `Bearer ${customerToken}`);
+    expect(deleteCustomer.status).toBe(403);
+  });
 });

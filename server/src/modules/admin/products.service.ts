@@ -5,6 +5,7 @@ import type {
   AdminProductListQuery,
   AdminProductListResponse,
   AdminProductSummaryDto,
+  AdminVariantInput,
   CreateProductInput,
   UpdateProductInput,
   UpdateVariantInput,
@@ -268,6 +269,72 @@ export async function updateVariant(
       },
     });
     await recordAudit(actorId, 'product.variant.update', 'ProductVariant', variantId, input as Prisma.InputJsonValue, tx);
+  });
+
+  return getProductById(productId);
+}
+
+export async function createVariant(
+  actorId: string,
+  productId: string,
+  input: AdminVariantInput,
+): Promise<AdminProductDetailDto> {
+  const product = await prisma.product.findUnique({ where: { id: productId } });
+  if (!product) throw new NotFoundError('Product not found');
+
+  const clashingSku = await prisma.productVariant.findUnique({ where: { sku: input.sku } });
+  if (clashingSku) throw new ConflictError(`SKU already in use: ${input.sku}`);
+
+  await prisma.$transaction(async (tx) => {
+    const variant = await tx.productVariant.create({
+      data: {
+        productId,
+        sku: input.sku,
+        attributes: input.attributes,
+        stockQty: input.stockQty,
+        lowStockThreshold: input.lowStockThreshold,
+        priceOverride: input.priceOverride ?? null,
+        compareAtPrice: input.compareAtPrice ?? null,
+      },
+    });
+    await recordAudit(actorId, 'product.variant.create', 'ProductVariant', variant.id, { sku: variant.sku, productId }, tx);
+  });
+
+  return getProductById(productId);
+}
+
+export async function deleteVariant(actorId: string, productId: string, variantId: string): Promise<AdminProductDetailDto> {
+  // Known, accepted narrow race: two concurrent deletes targeting two
+  // DIFFERENT variants of the same 2-variant product could both read
+  // variantCount=2 here and both proceed, leaving zero variants. Unlike the
+  // stock/coupon/default-address guards elsewhere in this codebase, this
+  // isn't backed by a DB-level constraint (Postgres has no simple way to
+  // express "at least one child row per parent" short of a trigger, which
+  // has no precedent in this schema). Accepted because it requires an
+  // admin to deliberately click delete on two different rows within
+  // milliseconds of each other, and the worst outcome is a data-quality
+  // issue (an admin adding a variant back), never a security or financial
+  // one — unlike the invariants that DO have DB-level backstops.
+  const [variant, variantCount] = await Promise.all([
+    prisma.productVariant.findFirst({ where: { id: variantId, productId } }),
+    prisma.productVariant.count({ where: { productId } }),
+  ]);
+  if (!variant) throw new NotFoundError('Variant not found');
+  if (variantCount <= 1) {
+    throw new ConflictError("Cannot delete a product's last remaining variant — every product needs at least one.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    // Discontinuing a variant removes it from any customer's in-progress
+    // cart too (CartItem.variantId is ON DELETE RESTRICT, so this delete
+    // would otherwise fail outright while anyone has it in their cart). A
+    // cart is ephemeral customer state, not a durable record the way an
+    // order is: OrderItem snapshots variantSku/variantAttributes as plain
+    // values, never a live reference, so past orders are never touched by
+    // this — see orders.service.ts's itemsData mapping.
+    await tx.cartItem.deleteMany({ where: { variantId } });
+    await tx.productVariant.delete({ where: { id: variantId } });
+    await recordAudit(actorId, 'product.variant.delete', 'ProductVariant', variantId, { sku: variant.sku, productId }, tx);
   });
 
   return getProductById(productId);

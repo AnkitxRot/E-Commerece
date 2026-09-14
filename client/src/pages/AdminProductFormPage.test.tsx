@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
@@ -161,5 +161,130 @@ describe('AdminProductFormPage (edit)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(screen.getByLabelText('Stock for TEST-SKU-1')).toHaveValue(3));
+  });
+
+  it('hides the delete button for a product\'s only variant', async () => {
+    const productId = '88888888-8888-4888-8888-888888888888';
+    const variantId = '99999999-9999-4999-8999-999999999999';
+    const productDetail = {
+      product: {
+        id: productId,
+        slug: 'test-speaker',
+        name: 'Test Speaker',
+        description: 'desc',
+        status: 'ACTIVE',
+        basePrice: '1999.00',
+        categoryId: CATEGORY_ID,
+        brandId: null,
+        featured: false,
+        seoTitle: null,
+        seoDescription: null,
+        specs: {},
+        createdAt: '2026-01-01T00:00:00.000Z',
+        variants: [
+          {
+            id: variantId,
+            sku: 'TEST-SKU-1',
+            attributes: { Color: 'Black' },
+            stockQty: 10,
+            reservedQty: 0,
+            lowStockThreshold: 5,
+            priceOverride: null,
+            compareAtPrice: null,
+          },
+        ],
+      },
+    };
+
+    vi.mocked(apiFetch).mockImplementation(async (path: string) => {
+      if (path === '/api/admin/categories') return CATEGORIES;
+      if (path === '/api/admin/brands') return BRANDS;
+      if (path === `/api/admin/products/${productId}`) return productDetail;
+      throw new Error(`Unexpected fetch: ${path}`);
+    });
+
+    render(
+      <MemoryRouter initialEntries={[`/admin/products/${productId}`]}>
+        <Routes>
+          <Route path="/admin/products/:id" element={<AdminProductFormPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Edit Test Speaker')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+  });
+
+  it('adds a new variant and deletes an existing one once confirmed', async () => {
+    const productId = '88888888-8888-4888-8888-888888888888';
+    const variantId = '99999999-9999-4999-8999-999999999999';
+    const newVariantId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const baseVariant = {
+      id: variantId,
+      sku: 'TEST-SKU-1',
+      attributes: { Color: 'Black' },
+      stockQty: 10,
+      reservedQty: 0,
+      lowStockThreshold: 5,
+      priceOverride: null,
+      compareAtPrice: null,
+    };
+    const baseProduct = {
+      id: productId,
+      slug: 'test-speaker',
+      name: 'Test Speaker',
+      description: 'desc',
+      status: 'ACTIVE',
+      basePrice: '1999.00',
+      categoryId: CATEGORY_ID,
+      brandId: null,
+      featured: false,
+      seoTitle: null,
+      seoDescription: null,
+      specs: {},
+      createdAt: '2026-01-01T00:00:00.000Z',
+      variants: [baseVariant],
+    };
+    const newVariant = { ...baseVariant, id: newVariantId, sku: 'TEST-SKU-2', stockQty: 5 };
+    const withTwoVariants = { ...baseProduct, variants: [baseVariant, newVariant] };
+    const withOneVariant = { ...baseProduct, variants: [baseVariant] };
+
+    let productState = baseProduct;
+    vi.mocked(apiFetch).mockImplementation(async (path: string, options?: RequestInit) => {
+      if (path === '/api/admin/categories') return CATEGORIES;
+      if (path === '/api/admin/brands') return BRANDS;
+      if (path === `/api/admin/products/${productId}` && !options?.method) return { product: productState };
+      if (path === `/api/admin/products/${productId}/variants` && options?.method === 'POST') {
+        productState = withTwoVariants;
+        return { product: withTwoVariants };
+      }
+      if (path === `/api/admin/products/${productId}/variants/${newVariantId}` && options?.method === 'DELETE') {
+        productState = withOneVariant;
+        return { product: withOneVariant };
+      }
+      throw new Error(`Unexpected fetch: ${path} ${options?.method}`);
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(
+      <MemoryRouter initialEntries={[`/admin/products/${productId}`]}>
+        <Routes>
+          <Route path="/admin/products/:id" element={<AdminProductFormPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Edit Test Speaker')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('SKU'), 'TEST-SKU-2');
+    await userEvent.click(screen.getByRole('button', { name: 'Add variant' }));
+
+    const newVariantStockInput = await screen.findByLabelText('Stock for TEST-SKU-2');
+    const newVariantRow = newVariantStockInput.closest('tr');
+    if (!newVariantRow) throw new Error('expected the new variant row to exist');
+
+    await userEvent.click(within(newVariantRow).getByRole('button', { name: 'Delete' }));
+    expect(confirmSpy).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByLabelText('Stock for TEST-SKU-2')).not.toBeInTheDocument());
+    confirmSpy.mockRestore();
   });
 });

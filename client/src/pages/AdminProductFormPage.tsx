@@ -6,6 +6,7 @@ import {
   adminBrandListResponseSchema,
   adminCategoryListResponseSchema,
   adminProductResponseSchema,
+  adminVariantInputSchema,
   createProductInputSchema,
   updateProductInputSchema,
   updateVariantInputSchema,
@@ -69,11 +70,19 @@ export default function AdminProductFormPage() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const [variantEdits, setVariantEdits] = useState<Record<string, { stockQty: string; lowStockThreshold: string }>>(
-    {},
-  );
+  type VariantEdit = { stockQty: string; lowStockThreshold: string; priceOverride: string; compareAtPrice: string };
+  const [variantEdits, setVariantEdits] = useState<Record<string, VariantEdit>>({});
   const [variantSavingId, setVariantSavingId] = useState<string | null>(null);
+  const [variantDeletingId, setVariantDeletingId] = useState<string | null>(null);
   const [variantError, setVariantError] = useState<string | null>(null);
+
+  const [newVariantSku, setNewVariantSku] = useState('');
+  const [newVariantAttrs, setNewVariantAttrs] = useState<AttributeRow[]>([{ key: 'Color', value: '' }]);
+  const [newVariantStockQty, setNewVariantStockQty] = useState('0');
+  const [newVariantThreshold, setNewVariantThreshold] = useState('5');
+  const [newVariantFieldErrors, setNewVariantFieldErrors] = useState<Record<string, string>>({});
+  const [newVariantServerError, setNewVariantServerError] = useState<string | null>(null);
+  const [addingVariant, setAddingVariant] = useState(false);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -108,7 +117,12 @@ export default function AdminProductFormPage() {
             Object.fromEntries(
               detail.variants.map((v) => [
                 v.id,
-                { stockQty: String(v.stockQty), lowStockThreshold: String(v.lowStockThreshold) },
+                {
+                  stockQty: String(v.stockQty),
+                  lowStockThreshold: String(v.lowStockThreshold),
+                  priceOverride: v.priceOverride ?? '',
+                  compareAtPrice: v.compareAtPrice ?? '',
+                },
               ]),
             ),
           );
@@ -200,6 +214,8 @@ export default function AdminProductFormPage() {
     const result = updateVariantInputSchema.safeParse({
       stockQty: Number(edit.stockQty),
       lowStockThreshold: Number(edit.lowStockThreshold),
+      priceOverride: edit.priceOverride.trim() || null,
+      compareAtPrice: edit.compareAtPrice.trim() || null,
     });
     if (!result.success) {
       setVariantError(result.error.issues[0]?.message ?? 'Invalid variant values');
@@ -217,6 +233,69 @@ export default function AdminProductFormPage() {
       setVariantError(err instanceof ApiError ? err.message : 'Unable to update this variant right now.');
     } finally {
       setVariantSavingId(null);
+    }
+  }
+
+  async function handleVariantDelete(variantId: string, sku: string) {
+    if (!product) return;
+    if (!window.confirm(`Delete variant "${sku}"? This can't be undone.`)) return;
+    setVariantDeletingId(variantId);
+    setVariantError(null);
+    try {
+      const data = await apiFetch(`/api/admin/products/${product.id}/variants/${variantId}`, { method: 'DELETE' });
+      setProduct(parseCatalog(adminProductResponseSchema, data).product);
+    } catch (err) {
+      setVariantError(err instanceof ApiError ? err.message : 'Unable to delete this variant right now.');
+    } finally {
+      setVariantDeletingId(null);
+    }
+  }
+
+  function updateNewVariantAttribute(index: number, field: 'key' | 'value', value: string) {
+    setNewVariantAttrs((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
+  }
+
+  async function handleAddVariant(event: FormEvent) {
+    event.preventDefault();
+    if (!product) return;
+    setNewVariantFieldErrors({});
+    setNewVariantServerError(null);
+
+    const attrsObject = Object.fromEntries(
+      newVariantAttrs.filter((row) => row.key.trim() && row.value.trim()).map((row) => [row.key.trim(), row.value.trim()]),
+    );
+    const result = adminVariantInputSchema.safeParse({
+      sku: newVariantSku,
+      attributes: attrsObject,
+      stockQty: Number(newVariantStockQty),
+      lowStockThreshold: Number(newVariantThreshold),
+    });
+    if (!result.success) {
+      setNewVariantFieldErrors(collectFieldErrors(result.error));
+      return;
+    }
+
+    setAddingVariant(true);
+    try {
+      const data = await apiFetch(`/api/admin/products/${product.id}/variants`, {
+        method: 'POST',
+        body: JSON.stringify(result.data),
+      });
+      const updated = parseCatalog(adminProductResponseSchema, data).product;
+      setProduct(updated);
+      const added = updated.variants[updated.variants.length - 1];
+      setVariantEdits((prev) => ({
+        ...prev,
+        [added.id]: { stockQty: String(added.stockQty), lowStockThreshold: String(added.lowStockThreshold), priceOverride: '', compareAtPrice: '' },
+      }));
+      setNewVariantSku('');
+      setNewVariantAttrs([{ key: 'Color', value: '' }]);
+      setNewVariantStockQty('0');
+      setNewVariantThreshold('5');
+    } catch (err) {
+      setNewVariantServerError(err instanceof ApiError ? err.message : 'Unable to add this variant right now.');
+    } finally {
+      setAddingVariant(false);
     }
   }
 
@@ -412,7 +491,8 @@ export default function AdminProductFormPage() {
               <thead>
                 <tr className="border-b border-border text-left text-ink-muted">
                   <th className="px-4 py-2 font-medium">SKU</th>
-                  <th className="px-4 py-2 font-medium">Price</th>
+                  <th className="px-4 py-2 font-medium">Price override</th>
+                  <th className="px-4 py-2 font-medium">Compare-at</th>
                   <th className="px-4 py-2 font-medium">Stock</th>
                   <th className="px-4 py-2 font-medium">Threshold</th>
                   <th className="px-4 py-2 font-medium" />
@@ -420,12 +500,36 @@ export default function AdminProductFormPage() {
               </thead>
               <tbody>
                 {product.variants.map((variant) => {
-                  const edit = variantEdits[variant.id] ?? { stockQty: '0', lowStockThreshold: '5' };
+                  const edit =
+                    variantEdits[variant.id] ?? { stockQty: '0', lowStockThreshold: '5', priceOverride: '', compareAtPrice: '' };
+                  const isOnlyVariant = product.variants.length === 1;
                   return (
                     <tr key={variant.id} className="border-b border-border last:border-0">
                       <td className="px-4 py-2 text-ink-muted">{variant.sku}</td>
-                      <td className="px-4 py-2 text-ink-muted">
-                        {inr.format(Number(variant.priceOverride ?? product.basePrice))}
+                      <td className="px-4 py-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          aria-label={`Price override for ${variant.sku} (blank = base price ${inr.format(Number(product.basePrice))})`}
+                          placeholder={product.basePrice}
+                          value={edit.priceOverride}
+                          onChange={(e) =>
+                            setVariantEdits((prev) => ({ ...prev, [variant.id]: { ...edit, priceOverride: e.target.value } }))
+                          }
+                          className="w-24 rounded-sm border border-border bg-bg px-2 py-1 text-sm"
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          aria-label={`Compare-at price for ${variant.sku}`}
+                          value={edit.compareAtPrice}
+                          onChange={(e) =>
+                            setVariantEdits((prev) => ({ ...prev, [variant.id]: { ...edit, compareAtPrice: e.target.value } }))
+                          }
+                          className="w-24 rounded-sm border border-border bg-bg px-2 py-1 text-sm"
+                        />
                       </td>
                       <td className="px-4 py-2">
                         <input
@@ -455,14 +559,26 @@ export default function AdminProductFormPage() {
                         />
                       </td>
                       <td className="px-4 py-2">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          loading={variantSavingId === variant.id}
-                          onClick={() => void handleVariantSave(variant.id)}
-                        >
-                          Save
-                        </Button>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            loading={variantSavingId === variant.id}
+                            onClick={() => void handleVariantSave(variant.id)}
+                          >
+                            Save
+                          </Button>
+                          {!isOnlyVariant && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              loading={variantDeletingId === variant.id}
+                              onClick={() => void handleVariantDelete(variant.id, variant.sku)}
+                            >
+                              Delete
+                            </Button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -470,6 +586,67 @@ export default function AdminProductFormPage() {
               </tbody>
             </table>
           </div>
+
+          <form
+            onSubmit={handleAddVariant}
+            noValidate
+            className="mt-4 flex flex-col gap-4 rounded-lg border border-border p-4"
+          >
+            <p className="text-sm font-medium text-ink">Add a new variant</p>
+            <Input
+              id="newVariantSku"
+              label="SKU"
+              value={newVariantSku}
+              error={newVariantFieldErrors.sku}
+              onChange={(e) => setNewVariantSku(e.target.value)}
+            />
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium text-ink">Attributes</p>
+              {newVariantAttrs.map((row, index) => (
+                <div key={index} className="flex gap-2">
+                  <Input
+                    id={`new-attr-key-${index}`}
+                    label="Attribute name"
+                    value={row.key}
+                    onChange={(e) => updateNewVariantAttribute(index, 'key', e.target.value)}
+                  />
+                  <Input
+                    id={`new-attr-value-${index}`}
+                    label="Attribute value"
+                    value={row.value}
+                    onChange={(e) => updateNewVariantAttribute(index, 'value', e.target.value)}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <Input
+                id="newVariantStockQty"
+                label="Stock quantity"
+                type="number"
+                min={0}
+                value={newVariantStockQty}
+                error={newVariantFieldErrors.stockQty}
+                onChange={(e) => setNewVariantStockQty(e.target.value)}
+              />
+              <Input
+                id="newVariantThreshold"
+                label="Low-stock threshold"
+                type="number"
+                min={0}
+                value={newVariantThreshold}
+                onChange={(e) => setNewVariantThreshold(e.target.value)}
+              />
+            </div>
+            {newVariantServerError && (
+              <p role="alert" className="text-sm text-danger">
+                {newVariantServerError}
+              </p>
+            )}
+            <Button type="submit" loading={addingVariant} className="self-start">
+              Add variant
+            </Button>
+          </form>
         </div>
       )}
     </div>

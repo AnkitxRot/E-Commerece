@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import type {
   AdminProductListQuery,
+  AdminVariantInput,
   CreateProductInput,
   UpdateProductInput,
   UpdateVariantInput,
@@ -34,5 +35,15 @@ export async function updateVariantHandler(req: Request, res: Response) {
     req.params.variantId,
     req.body as UpdateVariantInput,
   );
+  res.status(200).json({ product });
+}
+
+export async function createVariantHandler(req: Request, res: Response) {
+  const product = await productsService.createVariant(req.user!.id, req.params.id, req.body as AdminVariantInput);
+  res.status(201).json({ product });
+}
+
+export async function deleteVariantHandler(req: Request, res: Response) {
+  const product = await productsService.deleteVariant(req.user!.id, req.params.id, req.params.variantId);
   res.status(200).json({ product });
 }
